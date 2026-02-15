@@ -1,0 +1,15 @@
+{% if 'role' in messages[0] %}{% for message in messages %}{% if message['role'] == 'user' %}{{'<|im_start|>user
+' + message['content'] + '<|im_end|>
+'}}{% elif message['role'] == 'assistant' %}{{'<|im_start|>assistant
+' + message['content'] + '<|im_end|>
+' }}{% else %}{{ '<|im_start|>system
+' + message['content'] + '<|im_end|>
+' }}{% endif %}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant
+' }}{% endif %}{% else %}{% for message in messages %}{% if message['from'] == 'human' %}{{'<|im_start|>user
+' + message['value'] + '<|im_end|>
+'}}{% elif message['from'] == 'gpt' %}{{'<|im_start|>assistant
+' + message['value'] + '<|im_end|>
+' }}{% else %}{{ '<|im_start|>system
+' + message['value'] + '<|im_end|>
+' }}{% endif %}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant
+' }}{% endif %}{% endif %}

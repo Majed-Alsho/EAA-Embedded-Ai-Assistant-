@@ -1,0 +1,109 @@
+{
+  "1": {
+    "inputs": {
+      "ckpt_name": "SDXL\\juggernautXL_ragnarokBy.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": { "title": "Load Ragnarok (SDXL)" }
+  },
+  "2": {
+    "inputs": {
+      "image": "me.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": { "title": "Load Photo (from input/)" }
+  },
+  "3": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "width": 832,
+      "height": 1216,
+      "crop": "center",
+      "image": ["2", 0]
+    },
+    "class_type": "ImageScale",
+    "_meta": { "title": "Resize (8GB Safe)" }
+  },
+  "4": {
+    "inputs": {
+      "text": "photorealistic full body photo of the same person standing on the moon, astronaut suit, helmet visor fully open, face clearly visible, earth in the sky, cinematic lighting, ultra detailed, sharp focus, realistic skin, natural colors",
+      "clip": ["1", 1]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "Prompt" }
+  },
+  "5": {
+    "inputs": {
+      "text": "blurry, motion blur, out of focus, bad face, bad hands, extra limbs, deformed, glitch, smear, low detail, watermark, text, logo, jpeg artifacts",
+      "clip": ["1", 1]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "Negative" }
+  },
+  "6": {
+    "inputs": {
+      "pixels": ["3", 0],
+      "vae": ["1", 2]
+    },
+    "class_type": "VAEEncode",
+    "_meta": { "title": "VAE Encode (Img2Img)" }
+  },
+  "7": {
+    "inputs": {
+      "seed": 12345,
+      "steps": 30,
+      "cfg": 6.0,
+      "sampler_name": "dpmpp_2m_sde",
+      "scheduler": "karras",
+      "denoise": 0.38,
+      "model": ["1", 0],
+      "positive": ["4", 0],
+      "negative": ["5", 0],
+      "latent_image": ["6", 0]
+    },
+    "class_type": "KSampler",
+    "_meta": { "title": "KSampler (Img2Img)" }
+  },
+  "8": {
+    "inputs": {
+      "samples": ["7", 0],
+      "vae": ["1", 2]
+    },
+    "class_type": "VAEDecode",
+    "_meta": { "title": "Decode" }
+  },
+  "9": {
+    "inputs": {
+      "model_name": "4x-UltraSharp.pth"
+    },
+    "class_type": "UpscaleModelLoader",
+    "_meta": { "title": "Load UltraSharp" }
+  },
+  "10": {
+    "inputs": {
+      "upscale_model": ["9", 0],
+      "image": ["8", 0]
+    },
+    "class_type": "ImageUpscaleWithModel",
+    "_meta": { "title": "Upscale (4x)" }
+  },
+  "11": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "width": 1664,
+      "height": 2432,
+      "crop": "disabled",
+      "image": ["10", 0]
+    },
+    "class_type": "ImageScale",
+    "_meta": { "title": "Downscale to 2x (clean)" }
+  },
+  "12": {
+    "inputs": {
+      "filename_prefix": "EAA_Moon_Ragnarok",
+      "images": ["11", 0]
+    },
+    "class_type": "SaveImage",
+    "_meta": { "title": "Save" }
+  }
+}

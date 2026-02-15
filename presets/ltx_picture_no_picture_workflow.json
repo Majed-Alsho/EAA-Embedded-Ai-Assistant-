@@ -1,0 +1,92 @@
+{
+  "1": {
+    "inputs": {
+      "ckpt_name": "SDXL\\juggernautXL_ragnarokBy.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": { "title": "Load Ragnarok (SDXL)" }
+  },
+  "2": {
+    "inputs": {
+      "text": "photorealistic full body shot of a man standing on the moon, astronaut suit, helmet visor fully open, face clearly visible, earth in the sky, cinematic lighting, ultra detailed, sharp focus, realistic skin, natural colors",
+      "clip": ["1", 1]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "Prompt" }
+  },
+  "3": {
+    "inputs": {
+      "text": "blurry, motion blur, out of focus, bad face, bad hands, extra limbs, deformed, glitch, smear, low detail, watermark, text, logo, jpeg artifacts",
+      "clip": ["1", 1]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "Negative" }
+  },
+  "4": {
+    "inputs": {
+      "width": 832,
+      "height": 1216,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": { "title": "Latent (8GB Safe)" }
+  },
+  "5": {
+    "inputs": {
+      "seed": 12345,
+      "steps": 30,
+      "cfg": 6.0,
+      "sampler_name": "dpmpp_2m_sde",
+      "scheduler": "karras",
+      "denoise": 1.0,
+      "model": ["1", 0],
+      "positive": ["2", 0],
+      "negative": ["3", 0],
+      "latent_image": ["4", 0]
+    },
+    "class_type": "KSampler",
+    "_meta": { "title": "KSampler (Text2Img)" }
+  },
+  "6": {
+    "inputs": {
+      "samples": ["5", 0],
+      "vae": ["1", 2]
+    },
+    "class_type": "VAEDecode",
+    "_meta": { "title": "Decode" }
+  },
+  "7": {
+    "inputs": {
+      "model_name": "4x-UltraSharp.pth"
+    },
+    "class_type": "UpscaleModelLoader",
+    "_meta": { "title": "Load UltraSharp" }
+  },
+  "8": {
+    "inputs": {
+      "upscale_model": ["7", 0],
+      "image": ["6", 0]
+    },
+    "class_type": "ImageUpscaleWithModel",
+    "_meta": { "title": "Upscale (4x)" }
+  },
+  "9": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "width": 1664,
+      "height": 2432,
+      "crop": "disabled",
+      "image": ["8", 0]
+    },
+    "class_type": "ImageScale",
+    "_meta": { "title": "Downscale to 2x" }
+  },
+  "10": {
+    "inputs": {
+      "filename_prefix": "EAA_Text2Img_Ragnarok_UltraSharp",
+      "images": ["9", 0]
+    },
+    "class_type": "SaveImage",
+    "_meta": { "title": "Save" }
+  }
+}

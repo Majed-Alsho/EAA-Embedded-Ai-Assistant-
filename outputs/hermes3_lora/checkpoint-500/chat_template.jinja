@@ -1,0 +1,17 @@
+{% if 'role' in messages[0] %}{{ bos_token }}{% for message in messages %}{% if message['role'] == 'user' %}{{ '<|start_header_id|>user<|end_header_id|>
+
+' + message['content'] | trim + '<|eot_id|>' }}{% elif message['role'] == 'assistant' %}{{ '<|start_header_id|>assistant<|end_header_id|>
+
+' + message['content'] | trim + '<|eot_id|>' }}{% else %}{{ '<|start_header_id|>' + message['role'] + '<|end_header_id|>
+
+' + message['content'] | trim + '<|eot_id|>' }}{% endif %}{% endfor %}{% if add_generation_prompt %}{{ '<|start_header_id|>assistant<|end_header_id|>
+
+' }}{% endif %}{% else %}{{ bos_token }}{% for message in messages %}{% if message['from'] == 'human' %}{{ '<|start_header_id|>user<|end_header_id|>
+
+' + message['value'] | trim + '<|eot_id|>' }}{% elif message['from'] == 'gpt' %}{{ '<|start_header_id|>assistant<|end_header_id|>
+
+' + message['value'] | trim + '<|eot_id|>' }}{% else %}{{ '<|start_header_id|>' + message['from'] + '<|end_header_id|>
+
+' + message['value'] | trim + '<|eot_id|>' }}{% endif %}{% endfor %}{% if add_generation_prompt %}{{ '<|start_header_id|>assistant<|end_header_id|>
+
+' }}{% endif %}{% endif %}

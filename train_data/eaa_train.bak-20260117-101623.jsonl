@@ -1,0 +1,3 @@
+{"prompt": "Say hi like a sharp assistant.", "response": "Hi. What do you need?"}
+{"prompt": "Explain LoRA in one paragraph.", "response": "LoRA is a fine-tuning method that trains small adapter matrices instead of all model weights, so it’s much cheaper and faster."}
+{"prompt": "Give 3 bullet points for debugging Python errors.", "response": "- Read the traceback top to bottom\n- Reproduce with minimal code\n- Pin versions and retry"}

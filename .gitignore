@@ -1,0 +1,23 @@
+﻿# Ignore the massive Hugging Face cache
+cache/
+.cache/
+hf/
+
+# Ignore Virtual Environments
+.venv-hf/
+venv/
+env/
+
+# Ignore massive model weights
+*.safetensors
+*.bin
+*.pt
+*.pth
+
+# Ignore compiled python files
+__pycache__/
+*.pyc
+
+# Ignore system files
+.DS_Store
+Thumbs.db
