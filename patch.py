@@ -1,0 +1,3 @@
+p = r"C:\Users\offic\EAA\src-tauri\src\lib.rs" 
+with open(p, "r", encoding="utf-8") as f: c = f.read() 
+h = \"\"\"// Brain Health Check\n#[tauri::command(rename_all = \"camelCase\")]\nfn eaa_check_brain_health() -^> Result^<String, String^> {\n    let client = Client::builder().timeout(std::time::Duration::from_secs(5)).build().map_err(|e| format!(\"Failed: {}\", e))?;\n    let response = client.get(\"http://127.0.0.1:8000/v1/health\").send().map_err(|e| format!(\"Brain not reachable: {}\", e))?;\n    if response.status().is_success() { Ok(response.text().map_err(|e| format!(\"Read error: {}\", e))?) } else { Err(format!(\"Status: {}\", response.status())) }\n}\n\"\"\" 

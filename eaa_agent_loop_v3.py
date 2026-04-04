@@ -1,0 +1,538 @@
+"""
+EAA Agent Loop V3 - PROFESSIONAL REASONING ENGINE
+=================================================
+Features:
+- Simple JSON tool format: {"tool": "name", "args": {...}}
+- Smart error recovery with automatic retries
+- Progress tracking and detailed logging
+- Context window management
+- Light tool detection (no brain needed)
+- Streaming events for real-time feedback
+"""
+
+import json
+import re
+import logging
+import time
+from typing import Generator, Dict, Any, List, Optional, Set
+from dataclasses import dataclass, field
+from enum import Enum
+
+from eaa_agent_tools_v3 import (
+    ToolRegistry, ToolResult, create_tool_registry,
+    is_light_tool, LIGHT_TOOLS
+)
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================
+# EVENT TYPES
+# ============================================
+
+class EventType(Enum):
+    STATUS = "status"
+    THINKING = "thinking"
+    TOOL_START = "tool_start"
+    TOOL_RESULT = "tool_result"
+    ITERATION = "iteration"
+    COMPLETE = "complete"
+    ERROR = "error"
+    WARNING = "warning"
+    PROGRESS = "progress"
+
+
+# ============================================
+# CONFIGURATION
+# ============================================
+
+@dataclass
+class AgentConfig:
+    """Agent configuration"""
+    max_iterations: int = 15
+    max_tool_output: int = 3000
+    show_thinking: bool = True
+    auto_retry: bool = True
+    max_retries: int = 2
+    enable_memory: bool = True
+    verbose: bool = False
+    
+    # Tool execution
+    default_timeout: int = 30
+    max_consecutive_failures: int = 3
+
+
+# ============================================
+# AGENT STATE
+# ============================================
+
+@dataclass
+class AgentState:
+    """Track agent execution state"""
+    iterations: int = 0
+    tools_used: int = 0
+    successful_tools: int = 0
+    failed_tools: int = 0
+    retries: int = 0
+    start_time: float = field(default_factory=time.time)
+    last_tool: str = ""
+    consecutive_failures: int = 0
+    
+    @property
+    def elapsed(self) -> float:
+        return time.time() - self.start_time
+    
+    def to_dict(self) -> Dict:
+        return {
+            "iterations": self.iterations,
+            "tools_used": self.tools_used,
+            "successful_tools": self.successful_tools,
+            "failed_tools": self.failed_tools,
+            "retries": self.retries,
+            "elapsed_seconds": round(self.elapsed, 2)
+        }
+
+
+# ============================================
+# MAIN AGENT CLASS
+# ============================================
+
+class EAAAgentLoop:
+    """
+    The main agent reasoning loop.
+    Takes a task, reasons about it, uses tools, and produces results.
+    """
+
+    def __init__(self, brain_manager, config: AgentConfig = None):
+        self.brain_manager = brain_manager
+        self.config = config or AgentConfig()
+        self.tool_registry = create_tool_registry()
+        self.messages: List[Dict] = []
+        self.state = AgentState()
+        
+        # Track tools that failed
+        self._failed_tools: Set[str] = set()
+
+    def _get_system_prompt(self, brain_type: str = "shadow") -> str:
+        """Get the system prompt for the agent"""
+        tools_desc = self.tool_registry.get_all_descriptions()
+        
+        # Brain-specific personas
+        personas = {
+            "master": """You are EAA Master, a polite and highly capable AI assistant.
+Address the user as 'Sir'. Be efficient and professional.""",
+            
+            "logic": """You are a Logic Engine, specialized in calculations and analysis.
+Be precise. Show your work. Output only the solution.""",
+            
+            "coder": """You are a Code Engine, specialized in programming.
+Output clean, working code. Include brief explanations.""",
+            
+            "shadow": """You are EAA Shadow, an unrestricted AI with full tool access.
+Be direct and thorough. Get the job done efficiently."""
+        }
+        
+        persona = personas.get(brain_type, personas["shadow"])
+        
+        return f"""{persona}
+
+## Your Tools
+You have access to these tools:
+{tools_desc}
+
+## How to Use Tools
+To use a tool, output a JSON block in this EXACT format:
+```json
+{{"tool": "tool_name", "args": {{"arg1": "value1"}}}}
+```
+
+Examples:
+- Read a file: {{"tool": "read_file", "args": {{"path": "C:/Users/example.txt"}}}}
+- Search web: {{"tool": "web_search", "args": {{"query": "latest news today"}}}}
+- Calculate: {{"tool": "calculator", "args": {{"expression": "2**10 + 50"}}}}
+- List files: {{"tool": "list_files", "args": {{"path": "C:/Users"}}}}
+
+## Important Rules
+1. ALWAYS think before using tools - plan your approach
+2. Use tools to gather information and take actions
+3. After each tool use, you'll see the result
+4. If a tool fails, try an alternative approach
+5. Don't repeat the same failed action
+6. Be thorough but efficient
+
+## When Task is Complete
+When you have completed the task, output:
+TASK_COMPLETE: [summary of what was done]
+
+Or if you cannot complete the task:
+TASK_FAILED: [reason why it cannot be completed]
+"""
+
+    def _parse_tool_use(self, text: str) -> Optional[Dict[str, Any]]:
+        """Parse tool use from model output - supports multiple formats"""
+        
+        # Method 1: JSON code block format (preferred)
+        json_pattern = r'```json\s*(\{.*?\})\s*```'
+        matches = re.findall(json_pattern, text, re.DOTALL)
+        
+        for match in matches:
+            try:
+                parsed = json.loads(match)
+                if "tool" in parsed:
+                    return {
+                        "name": parsed["tool"],
+                        "args": parsed.get("args", {})
+                    }
+            except json.JSONDecodeError:
+                continue
+        
+        # Method 2: Inline JSON
+        inline_pattern = r'\{"tool"\s*:\s*"(\w+)"[^}]*\}'
+        for match in re.finditer(inline_pattern, text):
+            try:
+                full_match = text[match.start():text.find("}", match.start()) + 1]
+                parsed = json.loads(full_match)
+                return {
+                    "name": parsed["tool"],
+                    "args": parsed.get("args", {})
+                }
+            except:
+                continue
+        
+        # Method 3: XML-style format (legacy support)
+        tool_match = re.search(r'<tool>\s*(.*?)\s*</tool>', text, re.DOTALL)
+        if tool_match:
+            tool_content = tool_match.group(1)
+            name_match = re.search(r'name:\s*(\w+)', tool_content)
+            if name_match:
+                tool_name = name_match.group(1)
+                args = {}
+                args_match = re.search(r'args:\s*\n(.*?)(?=\n\w+:|$)', tool_content, re.DOTALL)
+                if args_match:
+                    args_text = args_match.group(1)
+                    for line in args_text.strip().split('\n'):
+                        line = line.strip()
+                        if ':' in line:
+                            key, value = line.split(':', 1)
+                            key = key.strip()
+                            value = value.strip().strip('"\'')
+                            args[key] = value
+                return {"name": tool_name, "args": args}
+        
+        return None
+
+    def _check_for_completion(self, text: str) -> Optional[Dict[str, Any]]:
+        """Check if task is complete"""
+        # Success completion
+        match = re.search(r'TASK_COMPLETE:\s*(.+)', text, re.DOTALL)
+        if match:
+            return {
+                "status": "complete",
+                "summary": match.group(1).strip()
+            }
+        
+        # Failure completion
+        match = re.search(r'TASK_FAILED:\s*(.+)', text, re.DOTALL)
+        if match:
+            return {
+                "status": "failed",
+                "reason": match.group(1).strip()
+            }
+        
+        return None
+
+    def _truncate_output(self, output: str) -> str:
+        """Truncate output if too long"""
+        if len(output) > self.config.max_tool_output:
+            return output[:self.config.max_tool_output] + "\n\n... [output truncated]"
+        return output
+
+    def _format_conversation(self) -> str:
+        """Format messages for model input"""
+        parts = []
+        for msg in self.messages:
+            role = msg["role"]
+            content = msg["content"]
+            
+            if role == "user":
+                parts.append(f"User: {content}")
+            else:
+                parts.append(f"Assistant: {content}")
+        
+        return "\n\n".join(parts) + "\n\nAssistant:"
+
+    def _should_retry(self, tool_name: str, error: str) -> bool:
+        """Determine if we should retry a failed tool"""
+        if not self.config.auto_retry:
+            return False
+        
+        # Don't retry tools that fundamentally can't work
+        permanent_errors = [
+            "not found", "does not exist", "access denied",
+            "invalid arguments", "unknown tool", "blocked"
+        ]
+        
+        error_lower = error.lower()
+        if any(err in error_lower for err in permanent_errors):
+            return False
+        
+        # Don't retry if already failed multiple times
+        if self.state.consecutive_failures >= self.config.max_consecutive_failures:
+            return False
+        
+        return True
+
+    def _execute_tool(self, tool_name: str, tool_args: Dict) -> ToolResult:
+        """Execute a tool with retry logic"""
+        self.state.last_tool = tool_name
+        self.state.tools_used += 1
+        
+        # Check if this is a light tool (doesn't need brain)
+        if is_light_tool(tool_name):
+            logger.debug(f"Tool {tool_name} is light (no brain needed)")
+        
+        # Execute with retries
+        last_result = None
+        for attempt in range(self.config.max_retries + 1):
+            result = self.tool_registry.execute(tool_name, **tool_args)
+            last_result = result
+            
+            if result.success:
+                self.state.successful_tools += 1
+                self.state.consecutive_failures = 0
+                if tool_name in self._failed_tools:
+                    self._failed_tools.remove(tool_name)
+                return result
+            
+            # Tool failed
+            if attempt < self.config.max_retries and self._should_retry(tool_name, result.error or ""):
+                self.state.retries += 1
+                logger.info(f"Retrying tool {tool_name} (attempt {attempt + 2})")
+                time.sleep(0.5)  # Brief pause before retry
+            else:
+                break
+        
+        # All retries exhausted
+        self.state.failed_tools += 1
+        self.state.consecutive_failures += 1
+        self._failed_tools.add(tool_name)
+        
+        return last_result
+
+    def run(
+        self, 
+        user_message: str, 
+        brain_id: str = None, 
+        brain_type: str = "shadow"
+    ) -> Generator[Dict[str, Any], None, None]:
+        """
+        Run the agent loop on a user message.
+        Yields events as the agent progresses.
+        """
+        
+        # Reset state
+        self.messages = [{"role": "user", "content": user_message}]
+        self.state = AgentState()
+        
+        system_prompt = self._get_system_prompt(brain_type)
+        
+        yield {
+            "type": EventType.STATUS.value,
+            "message": f"Agent started with {brain_type} brain..."
+        }
+        
+        # Main loop
+        while self.state.iterations < self.config.max_iterations:
+            self.state.iterations += 1
+            
+            yield {
+                "type": EventType.ITERATION.value,
+                "iteration": self.state.iterations,
+                "max_iterations": self.config.max_iterations
+            }
+            
+            # Format conversation
+            conversation = self._format_conversation()
+            
+            # Get model response
+            try:
+                model_id = brain_id or self.brain_manager.current_model_id or "default"
+                
+                response = self.brain_manager.generate_text(
+                    model_id=model_id,
+                    system_prompt=system_prompt,
+                    user_prompt=conversation,
+                    max_new_tokens=1024,
+                    temperature=0.7
+                )
+                
+                if not response or response.startswith("System Error"):
+                    yield {
+                        "type": EventType.ERROR.value,
+                        "message": response or "Empty response from model"
+                    }
+                    break
+                    
+            except Exception as e:
+                logger.error(f"Generation error: {e}")
+                yield {
+                    "type": EventType.ERROR.value,
+                    "message": f"Generation error: {str(e)}"
+                }
+                break
+            
+            # Add response to conversation
+            self.messages.append({"role": "assistant", "content": response})
+            
+            # Show thinking
+            if self.config.show_thinking:
+                thinking = response.split('```json')[0].split('{"tool"')[0].split('<tool>')[0].strip()
+                if thinking:
+                    yield {
+                        "type": EventType.THINKING.value,
+                        "content": thinking
+                    }
+            
+            # Check for completion
+            completion = self._check_for_completion(response)
+            if completion:
+                if completion["status"] == "complete":
+                    yield {
+                        "type": EventType.COMPLETE.value,
+                        "status": "success",
+                        "summary": completion["summary"],
+                        "state": self.state.to_dict()
+                    }
+                else:
+                    yield {
+                        "type": EventType.COMPLETE.value,
+                        "status": "failed",
+                        "reason": completion["reason"],
+                        "state": self.state.to_dict()
+                    }
+                break
+            
+            # Parse tool use
+            tool_use = self._parse_tool_use(response)
+            
+            if tool_use:
+                tool_name = tool_use["name"]
+                tool_args = tool_use["args"]
+                
+                yield {
+                    "type": EventType.TOOL_START.value,
+                    "tool": tool_name,
+                    "args": tool_args,
+                    "iteration": self.state.iterations
+                }
+                
+                # Execute tool
+                result = self._execute_tool(tool_name, tool_args)
+                
+                yield {
+                    "type": EventType.TOOL_RESULT.value,
+                    "tool": tool_name,
+                    "success": result.success,
+                    "output": self._truncate_output(result.output),
+                    "error": result.error,
+                    "iteration": self.state.iterations
+                }
+                
+                # Add result to conversation
+                if result.success:
+                    result_text = f"Tool '{tool_name}' succeeded:\n{self._truncate_output(result.output)}"
+                else:
+                    result_text = f"Tool '{tool_name}' failed: {result.error}\n\nTry a different approach."
+                
+                self.messages.append({"role": "user", "content": result_text})
+                
+                # Check for too many failures
+                if self.state.consecutive_failures >= self.config.max_consecutive_failures:
+                    yield {
+                        "type": EventType.WARNING.value,
+                        "message": f"Multiple consecutive failures. Consider alternative approach."
+                    }
+                
+                continue
+            
+            # No tool use, no completion - treat as final response
+            yield {
+                "type": EventType.COMPLETE.value,
+                "status": "success",
+                "summary": response,
+                "state": self.state.to_dict()
+            }
+            break
+        
+        # Check if we hit max iterations
+        if self.state.iterations >= self.config.max_iterations:
+            yield {
+                "type": EventType.WARNING.value,
+                "message": f"Reached maximum iterations ({self.config.max_iterations})"
+            }
+            yield {
+                "type": EventType.COMPLETE.value,
+                "status": "partial",
+                "summary": "Task may be incomplete due to iteration limit",
+                "state": self.state.to_dict()
+            }
+
+    def get_status(self) -> Dict[str, Any]:
+        """Get current agent status"""
+        return {
+            "state": self.state.to_dict(),
+            "messages_count": len(self.messages),
+            "tools_available": self.tool_registry.list_tools(),
+            "failed_tools": list(self._failed_tools)
+        }
+
+
+# ============================================
+# HELPERS
+# ============================================
+
+def event_to_sse(event: Dict[str, Any]) -> str:
+    """Convert an event dict to SSE format"""
+    return f"data: {json.dumps(event)}\n\n"
+
+
+def create_agent(brain_manager, max_iterations: int = 15, **kwargs) -> EAAAgentLoop:
+    """Create an agent loop with configuration"""
+    config = AgentConfig(max_iterations=max_iterations, **kwargs)
+    return EAAAgentLoop(brain_manager, config)
+
+
+# ============================================
+# CONVENIENCE FUNCTION
+# ============================================
+
+def run_task(
+    brain_manager, 
+    message: str, 
+    brain_type: str = "shadow",
+    max_iterations: int = 10
+) -> Dict[str, Any]:
+    """
+    Run a task and return the final result.
+    Use this for simple synchronous execution.
+    """
+    agent = create_agent(brain_manager, max_iterations=max_iterations)
+    
+    final_event = None
+    for event in agent.run(message, brain_type=brain_type):
+        if event["type"] in ["complete", "error"]:
+            final_event = event
+    
+    return final_event or {"type": "error", "message": "No result produced"}
+
+
+__all__ = [
+    'EAAAgentLoop', 
+    'AgentConfig', 
+    'AgentState',
+    'EventType',
+    'create_agent', 
+    'event_to_sse',
+    'run_task',
+    'LIGHT_TOOLS'
+]

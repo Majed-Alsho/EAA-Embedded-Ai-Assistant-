@@ -155,9 +155,9 @@ export default function App() {
     const checkBrainHealth = async () => {
       try {
         logLine(`[system] Connecting to Brain... (${attempts + 1})`);
-        const res = await fetch("http://127.0.0.1:8000/v1/health");
-        if (res.ok) {
-          const data = await res.json();
+        const dataStr = await invoke<string>("eaa_check_brain_health");
+          const data = JSON.parse(dataStr);
+          if (true) {
           if (data.status === "online") {
             // ✅ Success: Stop Loading, Show Hub
             setIsBusy(false);

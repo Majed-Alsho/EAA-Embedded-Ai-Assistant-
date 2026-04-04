@@ -10,6 +10,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use reqwest::blocking::Client;
 use tauri::Manager;
 
 mod comfyui_cmds;
@@ -955,6 +956,21 @@ fn eaa_open_url(url: String) -> Result<(), String> {
     Ok(())
 }
 
+
+#[tauri::command(rename_all = "camelCase")]
+fn eaa_check_brain_health() -> Result<String, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build().map_err(|e| format!("HTTP client error: {}", e))?;
+    let resp = client.get("http://127.0.0.1:8000/v1/health").send()
+        .map_err(|e| format!("Brain not reachable: {}", e))?;
+    if resp.status().is_success() {
+        Ok(resp.text().map_err(|e| format!("Read error: {}", e))?)
+    } else {
+        Err(format!("Status: {}", resp.status()))
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -1009,7 +1025,8 @@ pub fn run() {
       eaa_set_workspace_root,
       eaa_set_presets_root,
       eaa_list_presets,
-      eaa_save_preset
+      eaa_save_preset,
+      eaa_check_brain_health
     ])
     // ✅ CHANGED: Manually build/run to catch the exit event cleanly
     .build(tauri::generate_context!())

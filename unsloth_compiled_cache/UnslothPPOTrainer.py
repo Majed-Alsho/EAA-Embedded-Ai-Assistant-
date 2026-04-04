@@ -322,7 +322,7 @@ class UnslothPPOConfig(PPOConfig):
     
     def __init__(
         self,
-        exp_name = 'run_eaa_agent',
+        exp_name = 'run_eaa_agent_v3',
         seed = 3407,
         log_with = None,
         task_name = None,
