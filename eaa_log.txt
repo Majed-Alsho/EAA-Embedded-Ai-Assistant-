@@ -1,0 +1,80 @@
+C:\Users\offic\EAA\.venv-hf\Lib\site-packages\transformers\utils\hub.py:110: FutureWarning: Using `TRANSFORMERS_CACHE` is deprecated and will be removed in v5 of Transformers. Use `HF_HOME` instead.
+  warnings.warn(
+W0307 16:16:57.468000 19960 .venv-hf\Lib\site-packages\torch\distributed\elastic\multiprocessing\redirects.py:29] NOTE: Redirects are currently not supported in Windows or MacOs.
+C:\Users\offic\EAA\run_eaa_agent_v3.py:723: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+C:\Users\offic\EAA\run_eaa_agent_v3.py:740: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("shutdown")
+🦥 Unsloth: Will patch your computer to enable 2x faster free finetuning.
+🦥 Unsloth Zoo will now patch everything to make training faster!
+Unsloth: Could not import trl.trainer.ddpo_trainer: Failed to import trl.trainer.ddpo_trainer because of the following error (look up to see its traceback):
+Failed to import trl.models.modeling_sd_base because of the following error (look up to see its traceback):
+Failed to import diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion because of the following error (look up to see its traceback):
+Failed to import diffusers.loaders.ip_adapter because of the following error (look up to see its traceback):
+'NoneType' object has no attribute 'start'
+[SYSTEM] 🤖 Agent Mode V3 Available - PROFESSIONAL GRADE!
+Python is a high-level, general-purpose programming language. Its design philosophy emphasizes code readability with the use of significant indentation. Python is dynamically type-checked and garbage-collected. It supports multiple programming paradigms, including structured, object-oriented and functional programming. Guido van Rossum began working on Python in the late 1980s as a successor to the ABC programming language. Python 3.0, released in 2008, was a major revision and not completely backward-compatible with earlier versions. Beginning with Python 3.5, capabilities and keywords for typing were added to the language, allowing optional static typing. As of 2026, the Python Software Foundation supports Python 3.10, 3.11, 3.12, 3.13, and 3.14, following the project's annual release cycle and five-year support policy. Python 3.15 is currently in the alpha development phase, and the stable release is expected to come out in October 2026.
+[SYSTEM] 🌍 Researcher Module Loaded.
+pygame 2.6.1 (SDL 2.28.4, Python 3.11.9)
+Hello from the pygame community. https://www.pygame.org/contribute.html
+[SYSTEM] 🔊 Initializing Neural Voice (en-US-ChristopherNeural)...
+[SYSTEM] 🔊 Voice System Online.
+[SYSTEM] ✅ Voice Module Loaded.
+[SYSTEM] 👂 Initializing Whisper (tiny.en)...
+[SYSTEM] 👂 Auditory System Online.
+[SYSTEM] ✅ Ears Module Loaded.
+
+============================================================
+  EAA AGENT V3 - ENDPOINTS REGISTERED
+============================================================
+  GET  /v1/agent/tools         - List all tools
+  POST /v1/agent/run           - Run agent (streaming)
+  POST /v1/agent/chat          - Simple chat (non-streaming)
+  POST /v1/agent/stop          - Stop agent & free VRAM
+  GET  /v1/agent/status        - Full status
+  GET  /v1/agent/health        - Quick health check
+  GET  /v1/agent/vram          - VRAM usage info
+  POST /v1/agent/clear-vram    - Force clear VRAM
+  POST /v1/agent/brain/load    - Load specific brain
+  POST /v1/agent/brain/unload  - Unload brain
+============================================================
+  Light tools (no brain needed): 12
+============================================================
+
+[SYSTEM] 🤖 Agent V3 Endpoints Active!
+[CANVAS] ✅ Canvas endpoints ready
+
+============================================================
+   EAA V3 - PROFESSIONAL GRADE
+   18 Tools | Smart Brain Management | PRO Web Search
+============================================================
+
+INFO:     Started server process [19960]
+INFO:     Waiting for application startup.
+Exception in thread Thread-4 (load):
+Traceback (most recent call last):
+  File "C:\Users\offic\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Users\offic\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+TypeError: BrainManager.load() got an unexpected keyword argument 'adapter_path'
+INFO:     Application startup complete.
+ERROR:    [Errno 10048] error while attempting to bind on address ('127.0.0.1', 8000): only one usage of each socket address (protocol/network address/port) is normally permitted
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+
+============================================================
+   EAA V3 - PROFESSIONAL GRADE - STARTING UP
+============================================================
+[TUNNEL] 🚇 Starting Cloudflare Tunnel on port 8000...
+[TUNNEL] 🛑 Collapsing tunnel(s)...

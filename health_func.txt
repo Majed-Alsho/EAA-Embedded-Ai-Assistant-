@@ -1,0 +1,3 @@
+// Brain Health Check 
+#[tauri::command(rename_all = "camelCase")]  
+fn eaa_check_brain_health() -> Result<String, String> { 
