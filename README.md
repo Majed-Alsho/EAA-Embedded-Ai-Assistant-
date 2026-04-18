@@ -1010,6 +1010,210 @@ npm run tauri build
 
 ---
 
+
+---
+
+## EAA V4 - Reverse-Engineered Claude Code Framework
+
+<div align="center">
+
+**The next generation of EAA - a fully local, hierarchical MoE agent framework**
+
+*Reverse-engineering Claude Code's architecture to run entirely on consumer hardware*
+
+Built for **RTX 4060 Ti (8GB VRAM)** • **Qwen2.5-7B-Instruct** • **BitsAndBytes 4-bit**
+
+</div>
+
+### What is EAA V4?
+
+EAA V4 is a ground-up rebuild of the EAA agent system, inspired by and reverse-engineered from Claude Code's architecture. Instead of a single monolithic agent, EAA V4 uses a **Hierarchical Mixture of Experts (MoE)** approach where a master orchestrator (Jarvis) intelligently delegates tasks to specialized worker models. The entire system runs locally on a single consumer GPU with only 8GB of VRAM, using 4-bit quantization to fit a powerful 7B parameter model.
+
+Unlike the original EAA which relied on a single GGUF brain with llama-cpp, EAA V4 introduces multiple independent modules that handle different aspects of the agent loop - from permission checking and file operations to context management and cross-session memory. Each module is independently testable with over 626 unit tests across 8 development phases.
+
+### Architecture
+
+```
+Master (Jarvis) - Orchestrator Agent
+    |
+    +-- Qwen-Coder        -- Code generation specialist
+    +-- Shadow            -- Review & critique specialist
+    +-- DeepSeek R1       -- Chain-of-thought reasoning
+    +-- Browser Use       -- Web navigation & automation
+```
+
+The Jarvis orchestrator acts as a routing layer that analyzes incoming requests and delegates them to the most appropriate worker model. Each worker specializes in a specific domain, allowing the system to handle complex multi-step tasks that would overwhelm a single model. The 4-bit quantized Qwen2.5-7B model provides an excellent balance of capability and memory efficiency, fitting comfortably within the 8GB VRAM budget while maintaining strong reasoning and code generation abilities.
+
+### Development Phases (0-7 Complete)
+
+#### Phase 0 - Core Foundation (57 tests)
+The foundational layer that all other phases build upon. Implements the hierarchical routing between the master orchestrator and worker models, along with essential infrastructure for safe code execution and GPU memory management.
+
+| File | Purpose |
+|------|---------|
+| `router.py` | Hierarchical MoE routing - Jarvis delegates tasks to specialized workers based on request analysis |
+| `workers.py` | Worker model management, lifecycle, health monitoring, and load balancing |
+| `dry_run.py` | Safe code execution preview - simulates changes before applying them to prevent destructive operations |
+| `plan_formatter.py` | Structured plan output formatting with markdown tables, checklists, and progress tracking |
+| `vram_manager.py` | GPU memory tracking, allocation, and deallocation - ensures the 8GB VRAM budget is never exceeded |
+
+#### Phase 1 - Permission System (94 tests)
+A comprehensive security layer that controls what the AI can and cannot do on the user's system. Implements configurable rules, AI-powered safety classification, and a three-tier permission checking framework.
+
+| File | Purpose |
+|------|---------|
+| `permissions.py` | Core permission checking framework with allow/deny/ask user prompt modes |
+| `permission_rules.py` | Configurable permission rules loaded from YAML - supports glob patterns, file types, and path restrictions |
+| `safety_classifier.py` | AI-powered safety classification that analyzes tool calls for potential danger before execution |
+
+#### Phase 2 - File Operations (75 tests)
+Intelligent file management that goes beyond simple read/write. Includes conflict detection, state snapshots, and one-click rollback capabilities inspired by Claude Code's file handling.
+
+| File | Purpose |
+|------|---------|
+| `smart_edit.py` | Intelligent file editing with automatic conflict detection, diff generation, and merge conflict resolution |
+| `file_state.py` | File state tracking and snapshots - records every change with timestamps and checksums |
+| `rollback.py` | One-click rollback to any previous file state - supports selective and full rollback |
+| `history_index.py` | File change history indexing with search, filtering, and timeline visualization |
+
+#### Phase 3 - Context Management (comprehensive test suite)
+Manages the limited context window efficiently to maximize the AI's effectiveness. Implements multi-layer cascading context, real-time token monitoring, and intelligent conversation compression.
+
+| File | Purpose |
+|------|---------|
+| `context_manager.py` | Multi-layer context cascade system that prioritizes relevant information within the token budget |
+| `token_tracker.py` | Real-time token usage monitoring with alerts when approaching context limits |
+| `conversation_compactor.py` | Smart conversation compression that preserves key information while reducing token count |
+| `system_memory.py` | Persistent system-level memory that survives across sessions for maintaining long-term context |
+
+#### Phase 4 - Prompt Engineering (139 tests)
+Advanced prompt construction and caching system that optimizes how information is presented to the AI model for maximum effectiveness and efficiency.
+
+| File | Purpose |
+|------|---------|
+| `prompt_assembler.py` | Dynamic prompt construction from multiple sources - system prompts, memory, tool descriptions, and user context |
+| `prompt_cache.py` | Prompt caching for frequently used prompt combinations - reduces redundant computation |
+| `memory_loader.py` | YAML frontmatter memory loading with automatic injection into prompts |
+| `tool_instructions.py` | Tool use instruction templates with automatic formatting based on available tools |
+
+#### Phase 5 - Plugin System & Model Registry (133 tests)
+Extensible plugin architecture that allows adding new capabilities without modifying core code. Includes a model registry for managing multiple AI models and their GPU memory lifecycle.
+
+| File | Purpose |
+|------|---------|
+| `plugin_config.py` | Plugin configuration management with schema validation and hot-reload support |
+| `plugin_manager.py` | Plugin lifecycle management - discovery, loading, hot-loading, and dependency resolution |
+| `model_registry.py` | Multi-model registration and switching with automatic VRAM budgeting per model |
+| `vram_lifecycle.py` | GPU memory lifecycle management - handles model loading, unloading, and memory defragmentation |
+
+#### Phase 6 - Self-Healing Loop (70 tests)
+Critical reliability layer that ensures the agent can recover from errors automatically. Implements a three-tier recovery cascade, syntax validation hooks, and task isolation for concurrent operations.
+
+| File | Purpose |
+|------|---------|
+| `error_handler.py` | 3-tier token recovery cascade: double tokens → inject continuation prompt → escalate to Master orchestrator. Also intercepts JSONDecodeError from malformed AI outputs and wraps them as recoverable tool results. |
+| `validation_hooks.py` | Pre-execution syntax validation using py_compile, plus a Transient UI Spinner pattern for user feedback during long operations |
+| `concurrent_isolation.py` | Sibling-aware task isolation that prevents concurrent file operations from corrupting each other's state |
+
+#### Phase 7 - Cross-Session Memory (56 tests)
+Enables the agent to remember context across sessions without requiring expensive LLM API calls. Uses rolling Markdown notes, heuristic extraction, and global command history.
+
+| File | Purpose |
+|------|---------|
+| `session_transcript.py` | JSONL-based persistence layer with token-aware resume capability and a 6K token hard cap for session continuity |
+| `session_memory.py` | Rolling Markdown notes system that maintains context summaries using zero-API-call compaction (no LLM needed) |
+| `memory_extractor.py` | Background heuristic extraction engine with a 4K sliding window (1K overlap) that identifies important information from conversations |
+| `prompt_history.py` | Global project-level command history with search, replay, and deduplication capabilities |
+
+### EAA V4 File Map
+
+```
+eaa_v4/
+├── session_transcript.py      <-- Phase 7
+├── session_memory.py          <-- Phase 7
+├── memory_extractor.py        <-- Phase 7
+├── prompt_history.py          <-- Phase 7
+├── error_handler.py           <-- Phase 6
+├── validation_hooks.py        <-- Phase 6
+├── concurrent_isolation.py    <-- Phase 6
+├── plugin_config.py           <-- Phase 5
+├── plugin_manager.py          <-- Phase 5
+├── model_registry.py          <-- Phase 5
+├── vram_lifecycle.py          <-- Phase 5
+├── prompt_cache.py            <-- Phase 4
+├── prompt_assembler.py        <-- Phase 4
+├── memory_loader.py           <-- Phase 4
+├── tool_instructions.py       <-- Phase 4
+├── context_manager.py         <-- Phase 3
+├── token_tracker.py           <-- Phase 3
+├── conversation_compactor.py  <-- Phase 3
+├── system_memory.py           <-- Phase 3
+├── smart_edit.py              <-- Phase 2
+├── file_state.py              <-- Phase 2
+├── rollback.py                <-- Phase 2
+├── history_index.py           <-- Phase 2
+├── permissions.py             <-- Phase 1
+├── permission_rules.py        <-- Phase 1
+├── safety_classifier.py       <-- Phase 1
+├── router.py                  <-- Phase 0
+├── workers.py                 <-- Phase 0
+├── dry_run.py                 <-- Phase 0
+├── plan_formatter.py          <-- Phase 0
+├── vram_manager.py            <-- Phase 0
+├── __init__.py
+├── README.md
+└── tests/
+    ├── __init__.py
+    ├── test_phase0.py         (57 tests)
+    ├── test_phase1.py         (94 tests)
+    ├── test_phase2.py         (75 tests)
+    ├── test_phase3.py         (comprehensive)
+    ├── test_phase4.py         (139 tests)
+    ├── test_phase5.py         (133 tests)
+    ├── test_phase6.py         (70 tests)
+    └── test_phase7.py         (56 tests)
+```
+
+### Running EAA V4 Tests
+
+```bash
+cd eaa_v4
+
+# Run all tests
+python -m pytest tests/ -v
+
+# Run a specific phase
+python tests/test_phase6.py
+python tests/test_phase7.py
+
+# Run with coverage
+python -m pytest tests/ -v --cov=. --cov-report=term-missing
+```
+
+**Total: 626+ tests across all 8 phases - all passing**
+
+### Key Design Principles
+
+1. **Self-Healing**: Errors are wrapped as `is_error: true` tool results and fed back to the LLM for automatic recovery, inspired by Claude Code's error handling
+2. **3-Tier Recovery Cascade**: Double token count → Inject continuation prompt → Escalate to Master orchestrator - each tier handles progressively harder errors
+3. **Zero-API Compaction**: Rolling Markdown notes for session memory instead of expensive LLM summarization calls - keeps the system fully local
+4. **Token-Aware Resume**: 6K token hard cap for cross-session continuity ensures sessions can be resumed without hitting context limits
+5. **Sliding Window Extraction**: 4K chunks with 1K overlap for background memory extraction - captures important context without missing edge cases
+6. **Hierarchical MoE**: Master Jarvis orchestrator delegates to specialist workers, mimicking Claude Code's agent architecture
+7. **Consumer Hardware First**: Everything designed to run on a single RTX 4060 Ti with 8GB VRAM using 4-bit quantization
+
+### Hardware Requirements
+
+| Component | Specification |
+|-----------|--------------|
+| **GPU** | NVIDIA RTX 4060 Ti (8GB VRAM) |
+| **Model** | Qwen2.5-7B-Instruct (BitsAndBytes 4-bit quantization) |
+| **Framework** | Hierarchical Mixture of Experts (MoE) |
+| **Context Window** | 8192 tokens |
+| **Total Tests** | 626+ across 8 phases |
+
+---
+
 ## Author
 
 **Majed Al-Shoghri**
