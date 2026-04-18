@@ -1097,6 +1097,15 @@ def create_tool_registry() -> ToolRegistry:
         category="utility"
     )
     
+
+    # ── Advanced Tools (24 new tools) ──
+    try:
+        from eaa_agent_tools_advanced import register_advanced_tools, ADVANCED_LIGHT_TOOLS
+        register_advanced_tools(r)
+        LIGHT_TOOLS.update(ADVANCED_LIGHT_TOOLS)
+    except ImportError as e:
+        pass  # Advanced tools optional
+
     return r
 
 

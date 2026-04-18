@@ -1,0 +1,27 @@
+STARTING 25 tools
+[1/25] code_test FAIL (122s) HTTPConnectionPool(host='localhost', port=8000): Read timed out. (read timeout=120)
+[2/25] audio_info OK (108s) Audio information for the specified file has been retrieved and summarized.
+[3/25] video_info OK (11s) Video information has been obtained from the specified file.
+[4/25] audio_transcribe OK (11s) Audio file transcribed and the content was identified as "Chime".
+[5/25] video_analyze OK (11s) Video analysis completed for C:\Users\offic\EAA\test_video.mp4. The video has a resolution of 1x10, a frame rate of 1.0 
+[6/25] browser_open OK (10s) Opened the URL https://example.com in a non-headless browser.
+[7/25] browser_screenshot OK (22s) Since the event loop is already running, let's try opening the browser and navigating to the URL in a single step by usi
+[8/25] browser_close OK (54s) The browser session was forcefully terminated and the system was restarted to resolve any lingering issues.
+[9/25] browser_click OK (40s) 
+[10/25] browser_type OK (85s) Given the persistent issue with opening the browser, we can describe the steps in plain text without using tools. Here i
+[11/25] browser_scroll OK (98s) Provided manual steps for scrolling down by 300 pixels on a webpage.
+[12/25] browser_get_text OK (45s) 
+[13/25] notify_send OK (8s) NOTIFICATION_SENT: Title: Test, Message: Hello, Duration: 5 seconds
+[14/25] email_send OK (13s) 
+[15/25] sms_send OK (11s) 
+[16/25] app_launch FAIL (122s) HTTPConnectionPool(host='localhost', port=8000): Read timed out. (read timeout=120)
+[17/25] process_kill FAIL (122s) HTTPConnectionPool(host='localhost', port=8000): Read timed out. (read timeout=120)
+[18/25] image_generate FAIL (122s) HTTPConnectionPool(host='localhost', port=8000): Read timed out. (read timeout=120)
+[19/25] image_convert FAIL (122s) HTTPConnectionPool(host='localhost', port=8000): Read timed out. (read timeout=120)
+[20/25] image_resize FAIL (122s) HTTPConnectionPool(host='localhost', port=8000): Read timed out. (read timeout=120)
+[21/25] audio_generate FAIL (122s) HTTPConnectionPool(host='localhost', port=8000): Read timed out. (read timeout=120)
+[22/25] audio_convert FAIL (122s) HTTPConnectionPool(host='localhost', port=8000): Read timed out. (read timeout=120)
+[23/25] schedule_list2 FAIL (122s) HTTPConnectionPool(host='localhost', port=8000): Read timed out. (read timeout=120)
+[24/25] schedule_info FAIL (122s) HTTPConnectionPool(host='localhost', port=8000): Read timed out. (read timeout=120)
+[25/25] schedule_cancel FAIL (122s) HTTPConnectionPool(host='localhost', port=8000): Read timed out. (read timeout=120)
+DONE

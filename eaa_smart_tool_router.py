@@ -1,0 +1,367 @@
+"""
+EAA Smart Tool Router - Lazy Loading & Unloading
+=================================================
+Mimics the brain load/unload pattern but for tool categories.
+Instead of stuffing all 88 tools into every LLM prompt (VRAM heavy),
+this router picks ONLY the relevant tools for each request.
+
+How it works:
+1. Every request starts with CORE tools only (~10 tools, ~1K tokens)
+2. Router analyzes user message → picks relevant categories
+3. Only those categories get injected into the system prompt
+4. Task done → next request starts fresh from core (auto-unload)
+
+VRAM savings: 
+  Before: 88 tools = ~8K-10K tokens per prompt
+  After:  ~10-15 tools = ~1.5K-2.5K tokens per prompt
+  Savings: ~70-80% less context = ~2-4GB less VRAM
+"""
+
+import time
+import logging
+from typing import Dict, List, Set, Optional, Tuple
+
+logger = logging.getLogger(__name__)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TOOL CATEGORIES (same as in eaa_tool_executor.py)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+TOOL_CATEGORIES = {
+    "file": ["read_file", "write_file", "append_file", "list_files", "file_exists", "create_directory", "delete_file", "glob", "grep"],
+    "web": ["web_search", "web_fetch"],
+    "memory": ["memory_save", "memory_recall", "memory_list", "memory_search", "memory_clear", "memory_export", "memory_import", "memory_stats"],
+    "code": ["code_run", "code_lint", "code_format", "code_test", "python", "git_status", "git_commit", "git_diff", "git_log", "git_branch"],
+    "document": ["pdf_read", "pdf_info", "pdf_create", "docx_read", "docx_create", "xlsx_read", "xlsx_create", "pptx_read", "pptx_create"],
+    "system": ["shell", "screenshot", "clipboard_read", "clipboard_write", "process_list", "process_kill", "system_info", "app_launch", "env_get", "env_set", "datetime", "calculator"],
+    "multimodal": ["image_analyze", "image_describe", "ocr_extract", "image_generate", "image_info", "image_convert", "image_resize"],
+    "browser": ["browser_open", "browser_click", "browser_type", "browser_screenshot", "browser_scroll", "browser_get_text", "browser_close"],
+    "communication": ["email_send", "notify_send", "sms_send"],
+    "data": ["json_parse", "csv_read", "csv_write", "database_query", "api_call", "hash_text", "hash_file"],
+    "audio_video": ["audio_transcribe", "audio_generate", "audio_info", "audio_convert", "video_analyze", "video_info"],
+    "scheduler": ["schedule_task", "schedule_list", "schedule_cancel", "schedule_info"],
+    "context": ["context_save", "context_load", "context_list", "context_delete"],
+    # ── Advanced Categories (24 new tools) ──
+    "infra": ["docker_list", "docker_build", "docker_start", "docker_stop", "docker_logs", "github_issue"],
+    "networking": ["whois_lookup", "dns_resolve", "subdomain_enum", "ping_host", "traceroute", "port_scan"],
+    "research": ["rss_read", "html_extract", "wayback_fetch"],
+    "iot": ["mqtt_publish", "mqtt_subscribe"],
+    "media_advanced": ["video_trim", "video_extract_audio", "video_compress", "pdf_split", "pdf_merge", "pdf_watermark"],
+}
+
+
+# Always-loaded core tools (essential, tiny VRAM footprint)
+CORE_TOOLS = [
+    "calculator", "datetime", "shell", "system_info",
+    "memory_list", "memory_recall", "memory_save",
+    "list_files", "file_exists", "read_file",
+]
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# KEYWORD MAPPINGS - How we detect which category the user needs
+# ═══════════════════════════════════════════════════════════════════════════════
+
+CATEGORY_KEYWORDS = {
+    "file": [
+        "file", "read file", "write file", "create file", "delete file",
+        "folder", "directory", "path", "save", "open file", "copy file",
+        "move file", "rename file", "list files", "find file", "search file",
+        "append", "create folder", "delete folder", "contents of", "log file",
+        "config file", "text file", "check if file",
+    ],
+    "web": [
+        "web", "search", "browse", "url", "website", "http", "https",
+        "fetch", "download", "scrape", "lookup", "google", "find online",
+        "look up", "search for", "on the internet", "online",
+    ],
+    "memory": [
+        "remember", "recall", "memory", "note", "notes", "saved",
+        "previous", "history", "store", "memorize", "memories",
+    ],
+    "code": [
+        "code", "python", "script", "execute", "compile", "debug",
+        "lint", "format code", "test", "git", "commit", "push",
+        "pull request", "branch", "repository", "repo", "programming",
+        "function", "class", "module", "import", "run code",
+    ],
+    "document": [
+        "pdf", "word", "excel", "spreadsheet", "powerpoint", "ppt",
+        "docx", "xlsx", "pptx", "document", "report", "invoice",
+        "create pdf", "read pdf", "parse document",
+    ],
+    "system": [
+        "screenshot", "screen capture", "clipboard", "copy paste",
+        "process", "running", "kill process", "system info", "specs",
+        "launch", "open app", "start program", "environment variable",
+        "env var", "calculate", "math", "time", "date", "command",
+        "terminal", "cmd", "powershell", "task manager", "performance",
+        "cpu", "ram", "disk", "uptime",
+    ],
+    "multimodal": [
+        "image", "picture", "photo", "ocr", "recognize text",
+        "analyze image", "describe image", "visual", "generate image",
+        "resize image", "convert image", "crop", "thumbnail",
+        "screenshot analysis",
+    ],
+    "browser": [
+        "browser", "navigate", "click on", "type into", "scroll",
+        "webpage", "tab", "fill form", "login to", "go to website",
+        "automate browser", "open browser",
+    ],
+    "communication": [
+        "email", "send email", "compose email", "notify", "notification",
+        "sms", "text message", "message someone", "alert",
+    ],
+    "data": [
+        "json", "csv", "database", "sql", "api call", "hash",
+        "parse", "data", "query", "convert data", "transform data",
+    ],
+    "audio_video": [
+        "audio", "video", "music", "transcribe", "record", "speech",
+        "media", "play", "sound", "voice", "extract audio",
+    ],
+    "scheduler": [
+        "schedule", "timer", "alarm", "remind", "cron", "delay",
+        "recurring", "periodic", "task schedule", "plan task",
+        "set timer", "after", "run at",
+    ],
+        "context": [
+        "context", "session", "state", "save context", "load context",
+        "switch context", "workspace",
+    ],
+    # ── Advanced Category Keywords ──
+    "infra": [
+        "docker", "container", "image build", "github", "pull request",
+        "issue", "repository", "deploy", "ci/cd", "pipeline",
+    ],
+    "networking": [
+        "whois", "dns", "domain", "subdomain", "ping", "traceroute",
+        "port scan", "network", "ip address", "dns lookup", "nslookup",
+        "recon", "enum", "enumerate",
+    ],
+    "research": [
+        "rss", "feed", "atom", "blog", "news feed", "subscribe",
+        "xpath", "css selector", "scrape", "extract html", "parse html",
+        "wayback", "archive", "historical", "snapshot",
+    ],
+    "iot": [
+        "mqtt", "broker", "publish", "subscribe topic", "iot",
+        "smart home", "sensor", "home assistant", "message queue",
+    ],
+    "media_advanced": [
+        "trim video", "cut video", "extract audio", "video to audio",
+        "compress video", "reduce video size", "split pdf", "merge pdf",
+        "combine pdf", "watermark", "stamp", "ffmpeg",
+    ],
+}
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SMART TOOL ROUTER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class SmartToolRouter:
+    """
+    Routes user messages to relevant tool categories.
+    Like SmartBrainManager but for tools - loads what's needed, unloads when idle.
+    """
+
+    def __init__(self, registry, auto_unload_delay: int = 60):
+        """
+        Args:
+            registry: ToolRegistry instance with all 88 tools registered
+            auto_unload_delay: Seconds before inactive categories get unloaded
+        """
+        self.registry = registry
+        self.auto_unload_delay = auto_unload_delay
+
+        # Track which categories are currently "loaded" (in prompt)
+        self._active_categories: Set[str] = {"core"}
+        self._category_timestamps: Dict[str, float] = {}
+        self._category_timestamps["core"] = time.time()
+
+        # Stats
+        self._total_requests = 0
+        self._tools_loaded_per_request = []
+
+        logger.info("[ToolRouter] Initialized - core tools always loaded")
+
+    def route(self, user_message: str) -> Tuple[List[str], int]:
+        """
+        Analyze user message and determine which tool categories to load.
+        Returns: (category_list, estimated_tool_count)
+        """
+        self._total_requests += 1
+        msg_lower = user_message.lower()
+
+        # Start with core tools (always loaded)
+        needed: Set[str] = {"core"}
+        tool_count = len(CORE_TOOLS)
+
+        # Score each category by keyword matches
+        category_scores: Dict[str, int] = {}
+        for category, keywords in CATEGORY_KEYWORDS.items():
+            score = 0
+            for keyword in keywords:
+                if keyword in msg_lower:
+                    score += 1
+            if score > 0:
+                category_scores[category] = score
+
+        # Load categories that matched (sorted by relevance)
+        for category in sorted(category_scores, key=category_scores.get, reverse=True):
+            needed.add(category)
+            tool_count += len(TOOL_CATEGORIES.get(category, []))
+
+        # Update timestamps
+        now = time.time()
+        self._active_categories = needed
+        for cat in needed:
+            self._category_timestamps[cat] = now
+
+        # Auto-unload stale categories
+        self._auto_unload()
+
+        # Track stats
+        self._tools_loaded_per_request.append(tool_count)
+        if len(self._tools_loaded_per_request) > 100:
+            self._tools_loaded_per_request = self._tools_loaded_per_request[-100:]
+
+        loaded_list = sorted(needed)
+        logger.info(f"[ToolRouter] Request #{self._total_requests}: "
+                     f"loaded {len(loaded_list)} categories, "
+                     f"{tool_count} tools, "
+                     f"categories={loaded_list}")
+
+        return loaded_list, tool_count
+
+    def get_tools_prompt(self, categories: List[str]) -> str:
+        """
+        Generate the tools section of the system prompt.
+        Only includes tools from the specified categories.
+        """
+        lines = ["## Available Tools\n"]
+
+        for category in categories:
+            if category == "core":
+                for tool_name in CORE_TOOLS:
+                    desc = self.registry._descriptions.get(tool_name, "No description")
+                    lines.append(f"- **{tool_name}**: {desc}")
+            else:
+                tools = TOOL_CATEGORIES.get(category, [])
+                for tool_name in tools:
+                    if tool_name in self.registry._descriptions:
+                        desc = self.registry._descriptions[tool_name]
+                        lines.append(f"- **{tool_name}** [{category}]: {desc}")
+
+        # Add hint about more tools available
+        all_categories = list(TOOL_CATEGORIES.keys())
+        hidden = [c for c in all_categories if c not in categories and c != "core"]
+        if hidden:
+            lines.append(f"\n*Note: Additional tool categories available on request: "
+                        f"{', '.join(hidden)}*")
+
+        return "\n".join(lines)
+
+    def on_tool_used(self, tool_name: str):
+        """
+        Called when a tool is executed.
+        Ensures the tool's category stays loaded.
+        """
+        for category, tools in TOOL_CATEGORIES.items():
+            if tool_name in tools:
+                self._category_timestamps[category] = time.time()
+                self._active_categories.add(category)
+                break
+
+    def _auto_unload(self):
+        """Remove categories that haven't been used recently AND free their imports."""
+        now = time.time()
+        unloaded = []
+        for cat in list(self._active_categories):
+            if cat == "core":
+                continue
+            last_used = self._category_timestamps.get(cat, 0)
+            if now - last_used > self.auto_unload_delay:
+                self._active_categories.discard(cat)
+                unloaded.append(cat)
+
+        # Actually free Python module imports for unloaded categories
+        if unloaded:
+            freed_modules = []
+            import sys as _sys
+            for cat in unloaded:
+                heavy = self._get_heavy_imports(cat)
+                for mod in heavy:
+                    # Remove from sys.modules if present
+                    for key in list(_sys.modules.keys()):
+                        if key == mod or key.startswith(mod + "."):
+                            try:
+                                del _sys.modules[key]
+                                freed_modules.append(key)
+                            except (KeyError, TypeError):
+                                pass
+            if freed_modules:
+                # Force garbage collection to reclaim memory
+                import gc as _gc
+                _gc.collect()
+                logger.info(f"[ToolRouter] Unloaded {len(unloaded)} categories, freed {len(freed_modules)} modules: {unloaded}")
+            else:
+                logger.info(f"[ToolRouter] Auto-unloaded idle categories: {unloaded}")
+
+    def _get_heavy_imports(self, category: str) -> list:
+        """Get list of heavy module names for a category that should be unloaded."""
+        HEAVY_IMPORTS = {
+            "document": ["docx", "python_docx", "openpyxl", "pptx",
+                         "PyPDF2", "pypdf", "pdfplumber"],
+            "media": ["PIL", "pillow", "cv2", "numpy",
+                      "whisper", "pyttsx3", "edge_tts",
+                      "moviepy", "imageio"],
+            "browser": ["playwright", "selenium", "bs4",
+                        "urllib3"],
+            "communication": ["smtplib", "aiohttp"],
+            "data": ["sqlite3", "csv", "hashlib"],
+            "dev": ["subprocess", "git"],
+        }
+        return HEAVY_IMPORTS.get(category, [])
+
+    def force_load_category(self, category: str) -> bool:
+        """
+        Manually force-load a category (e.g., if AI needs more tools).
+        Returns True if category exists.
+        """
+        if category in TOOL_CATEGORIES or category == "core":
+            self._active_categories.add(category)
+            self._category_timestamps[category] = time.time()
+            logger.info(f"[ToolRouter] Force-loaded category: {category}")
+            return True
+        return False
+
+    def expand_for_tool(self, tool_name: str) -> bool:
+        """
+        If AI tries to use a tool not in current prompt, load its category.
+        Returns True if a new category was loaded (prompt needs refresh).
+        """
+        for category, tools in TOOL_CATEGORIES.items():
+            if tool_name in tools and category not in self._active_categories:
+                self._active_categories.add(category)
+                self._category_timestamps[category] = time.time()
+                logger.info(f"[ToolRouter] Auto-expanded: loaded '{category}' "
+                           f"for tool '{tool_name}'")
+                return True
+        return False
+
+    def get_status(self) -> Dict:
+        """Get router status for debugging."""
+        avg_tools = (sum(self._tools_loaded_per_request[-20:]) /
+                     len(self._tools_loaded_per_request[-20:])
+                     if self._tools_loaded_per_request else 0)
+        return {
+            "active_categories": sorted(self._active_categories),
+            "total_categories": len(TOOL_CATEGORIES),
+            "total_requests": self._total_requests,
+            "avg_tools_per_request": round(avg_tools, 1),
+            "total_tools_available": sum(len(t) for t in TOOL_CATEGORIES.values()) + len(CORE_TOOLS),
+        }

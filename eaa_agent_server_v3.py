@@ -28,6 +28,22 @@ from eaa_agent_loop_v3 import (
 logger = logging.getLogger(__name__)
 
 # ============================================
+# ENHANCED TOOLS (88 tools from 10 modules)
+# ============================================
+HAS_ENHANCED_TOOLS = False
+_enhanced_registry = None
+_enhanced_history = None
+_enhanced_chain = None
+try:
+    from eaa_tool_executor import create_enhanced_registry, get_tools_prompt
+    _enhanced_registry, _enhanced_history, _enhanced_chain = create_enhanced_registry()
+    HAS_ENHANCED_TOOLS = True
+    print("[ENHANCED] 88 Enhanced Tools loaded successfully!")
+except Exception as e:
+    print(f"[ENHANCED] Enhanced tools not available: {e}")
+    print("[ENHANCED] Falling back to V3 tools (18 tools)")
+
+# ============================================
 # GLOBAL STATE
 # ============================================
 
@@ -84,23 +100,45 @@ def clear_vram() -> bool:
 
 
 def get_vram_info() -> dict:
-    """Get current VRAM usage"""
+    """Get REAL VRAM usage via nvidia-smi (not the lying torch numbers)"""
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.used,memory.total,memory.free", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            parts = result.stdout.strip().split(", ")
+            if len(parts) >= 3:
+                used_mb = int(parts[0])
+                total_mb = int(parts[1])
+                free_mb = int(parts[2])
+                return {
+                    "allocated_gb": round(used_mb / 1024, 2),
+                    "reserved_gb": round(used_mb / 1024, 2),
+                    "total_gb": round(total_mb / 1024, 2),
+                    "free_gb": round(free_mb / 1024, 2),
+                    "percent_used": round(used_mb / total_mb * 100, 1),
+                    "available": True,
+                    "source": "nvidia-smi"
+                }
+    except Exception:
+        pass
+    
+    # Fallback to torch (less accurate)
     try:
         import torch
         if torch.cuda.is_available():
             allocated = torch.cuda.memory_allocated(0) / (1024**3)
-            reserved = torch.cuda.memory_reserved(0) / (1024**3)
             total = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-            free = total - allocated
-            percent = (allocated / total) * 100
-            
             return {
                 "allocated_gb": round(allocated, 2),
-                "reserved_gb": round(reserved, 2),
+                "reserved_gb": round(allocated, 2),
                 "total_gb": round(total, 2),
-                "free_gb": round(free, 2),
-                "percent_used": round(percent, 1),
-                "available": True
+                "free_gb": round(total - allocated, 2),
+                "percent_used": round(allocated / total * 100, 1),
+                "available": True,
+                "source": "torch (fallback)"
             }
     except ImportError:
         pass
@@ -169,14 +207,21 @@ def setup_agent_endpoints(app: FastAPI, brain_manager):
     
     @app.get("/v1/agent/tools")
     async def list_agent_tools():
-        """List all available tools"""
-        from eaa_agent_tools_v3 import create_tool_registry
-        registry = create_tool_registry()
+        """List all available tools - Enhanced (88) if available, else V3 (18)"""
+        if HAS_ENHANCED_TOOLS and _enhanced_registry is not None:
+            registry = _enhanced_registry
+            enhanced = True
+        else:
+            from eaa_agent_tools_v3 import create_tool_registry
+            registry = create_tool_registry()
+            enhanced = False
         
         tools = []
+        schemas = getattr(registry, '_schemas', {})
+        descriptions = getattr(registry, '_descriptions', {})
         for name in registry.list_tools():
-            desc = registry._descriptions.get(name, "")
-            schema = registry._schemas.get(name, {})
+            desc = descriptions.get(name, "")
+            schema = schemas.get(name, {})
             is_light = name in LIGHT_TOOLS
             
             tools.append({
@@ -186,11 +231,14 @@ def setup_agent_endpoints(app: FastAPI, brain_manager):
                 "lightweight": is_light
             })
         
-        return {
+        result = {
             "tools": tools,
             "count": len(tools),
-            "light_tools": list(LIGHT_TOOLS)
+            "light_tools": list(LIGHT_TOOLS),
+            "enhanced": enhanced,
+            "smart_routing": enhanced  # Smart routing only with enhanced tools
         }
+        return result
     
     # ========================================
     # STOP ENDPOINT
@@ -276,7 +324,9 @@ def setup_agent_endpoints(app: FastAPI, brain_manager):
                     auto_retry=request.auto_retry
                 )
                 
-                agent = EAAAgentLoop(brain_manager, config)
+                # Pass enhanced registry if available (88 tools with smart routing)
+                registry = _enhanced_registry if HAS_ENHANCED_TOOLS else None
+                agent = EAAAgentLoop(brain_manager, config, tool_registry=registry)
                 
                 # Run agent loop
                 for event in agent.run(
@@ -337,7 +387,9 @@ def setup_agent_endpoints(app: FastAPI, brain_manager):
             show_thinking=False
         )
         
-        agent = EAAAgentLoop(brain_manager, config)
+        # Pass enhanced registry if available (88 tools with smart routing)
+        registry = _enhanced_registry if HAS_ENHANCED_TOOLS else None
+        agent = EAAAgentLoop(brain_manager, config, tool_registry=registry)
         final_response = None
         tools_used = 0
         

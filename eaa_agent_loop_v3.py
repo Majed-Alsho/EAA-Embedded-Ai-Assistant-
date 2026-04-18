@@ -1,6 +1,6 @@
 """
-EAA Agent Loop V3 - PROFESSIONAL REASONING ENGINE
-=================================================
+EAA Agent Loop V3 - PROFESSIONAL REASONING ENGINE (Smart Tool Routing)
+=======================================================================
 Features:
 - Simple JSON tool format: {"tool": "name", "args": {...}}
 - Smart error recovery with automatic retries
@@ -8,13 +8,16 @@ Features:
 - Context window management
 - Light tool detection (no brain needed)
 - Streaming events for real-time feedback
+- SMART TOOL ROUTING: Only loads relevant tool categories per request
+  (saves ~70-80% VRAM vs loading all 88 tools every time)
 """
 
 import json
 import re
+import gc
 import logging
 import time
-from typing import Generator, Dict, Any, List, Optional, Set
+from typing import Generator, Dict, Any, List, Optional, Set, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -22,6 +25,14 @@ from eaa_agent_tools_v3 import (
     ToolRegistry, ToolResult, create_tool_registry,
     is_light_tool, LIGHT_TOOLS
 )
+
+# Smart Tool Router - lazy load/unload tool categories
+try:
+    from eaa_smart_tool_router import SmartToolRouter, TOOL_CATEGORIES
+    HAS_SMART_ROUTER = True
+except ImportError:
+    HAS_SMART_ROUTER = False
+    TOOL_CATEGORIES = {}
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +51,7 @@ class EventType(Enum):
     ERROR = "error"
     WARNING = "warning"
     PROGRESS = "progress"
+    TOOLS_LOADED = "tools_loaded"
 
 
 # ============================================
@@ -60,6 +72,10 @@ class AgentConfig:
     # Tool execution
     default_timeout: int = 30
     max_consecutive_failures: int = 3
+    
+    # Smart routing
+    smart_routing: bool = True
+    tool_auto_unload_delay: int = 60  # seconds before idle categories unload
 
 
 # ============================================
@@ -101,21 +117,62 @@ class EAAAgentLoop:
     """
     The main agent reasoning loop.
     Takes a task, reasons about it, uses tools, and produces results.
+    
+    With smart routing enabled, only relevant tool categories are loaded
+    into the LLM prompt per request, saving massive VRAM.
     """
 
-    def __init__(self, brain_manager, config: AgentConfig = None):
+    def __init__(self, brain_manager, config: AgentConfig = None, tool_registry: ToolRegistry = None):
         self.brain_manager = brain_manager
         self.config = config or AgentConfig()
-        self.tool_registry = create_tool_registry()
+        
+        # Use provided registry or create default
+        self.tool_registry = tool_registry or create_tool_registry()
+        
         self.messages: List[Dict] = []
         self.state = AgentState()
         
         # Track tools that failed
         self._failed_tools: Set[str] = set()
+        
+        # Smart Tool Router (if available)
+        self.tool_router: Optional[SmartToolRouter] = None
+        if HAS_SMART_ROUTER and self.config.smart_routing:
+            self.tool_router = SmartToolRouter(
+                self.tool_registry, 
+                auto_unload_delay=self.config.tool_auto_unload_delay
+            )
+            logger.info("[AgentLoop] Smart Tool Router enabled - VRAM efficient mode")
+        else:
+            logger.info("[AgentLoop] Smart Tool Router not available - using all tools in prompt")
 
-    def _get_system_prompt(self, brain_type: str = "shadow") -> str:
-        """Get the system prompt for the agent"""
-        tools_desc = self.tool_registry.get_all_descriptions()
+    def _get_system_prompt(self, brain_type: str = "shadow", user_message: str = "") -> Tuple[str, Dict]:
+        """
+        Get the system prompt for the agent.
+        With smart routing, only includes relevant tool categories.
+        Returns: (system_prompt, routing_info)
+        """
+        routing_info = {"mode": "all", "categories": [], "tool_count": 0}
+        
+        # Decide which tools to include
+        if self.tool_router and self.config.smart_routing and user_message:
+            # SMART ROUTING: Only load relevant categories
+            categories, tool_count = self.tool_router.route(user_message)
+            tools_desc = self.tool_router.get_tools_prompt(categories)
+            routing_info = {
+                "mode": "smart",
+                "categories": categories,
+                "tool_count": tool_count,
+            }
+        else:
+            # FALLBACK: Load all tools (old behavior)
+            tools_desc = self.tool_registry.get_all_descriptions()
+            all_tools = self.tool_registry.list_tools()
+            routing_info = {
+                "mode": "all",
+                "categories": ["all"],
+                "tool_count": len(all_tools),
+            }
         
         # Brain-specific personas
         personas = {
@@ -134,7 +191,7 @@ Be direct and thorough. Get the job done efficiently."""
         
         persona = personas.get(brain_type, personas["shadow"])
         
-        return f"""{persona}
+        system_prompt = f"""{persona}
 
 ## Your Tools
 You have access to these tools:
@@ -151,6 +208,9 @@ Examples:
 - Search web: {{"tool": "web_search", "args": {{"query": "latest news today"}}}}
 - Calculate: {{"tool": "calculator", "args": {{"expression": "2**10 + 50"}}}}
 - List files: {{"tool": "list_files", "args": {{"path": "C:/Users"}}}}
+- Screenshot: {{"tool": "screenshot", "args": {{}}}}
+- System info: {{"tool": "system_info", "args": {{}}}}
+- Run shell: {{"tool": "shell", "args": {{"command": "dir"}}}}
 
 ## Important Rules
 1. ALWAYS think before using tools - plan your approach
@@ -167,6 +227,7 @@ TASK_COMPLETE: [summary of what was done]
 Or if you cannot complete the task:
 TASK_FAILED: [reason why it cannot be completed]
 """
+        return system_prompt, routing_info
 
     def _parse_tool_use(self, text: str) -> Optional[Dict[str, Any]]:
         """Parse tool use from model output - supports multiple formats"""
@@ -223,21 +284,13 @@ TASK_FAILED: [reason why it cannot be completed]
 
     def _check_for_completion(self, text: str) -> Optional[Dict[str, Any]]:
         """Check if task is complete"""
-        # Success completion
         match = re.search(r'TASK_COMPLETE:\s*(.+)', text, re.DOTALL)
         if match:
-            return {
-                "status": "complete",
-                "summary": match.group(1).strip()
-            }
+            return {"status": "complete", "summary": match.group(1).strip()}
         
-        # Failure completion
         match = re.search(r'TASK_FAILED:\s*(.+)', text, re.DOTALL)
         if match:
-            return {
-                "status": "failed",
-                "reason": match.group(1).strip()
-            }
+            return {"status": "failed", "reason": match.group(1).strip()}
         
         return None
 
@@ -253,12 +306,10 @@ TASK_FAILED: [reason why it cannot be completed]
         for msg in self.messages:
             role = msg["role"]
             content = msg["content"]
-            
             if role == "user":
                 parts.append(f"User: {content}")
             else:
                 parts.append(f"Assistant: {content}")
-        
         return "\n\n".join(parts) + "\n\nAssistant:"
 
     def _should_retry(self, tool_name: str, error: str) -> bool:
@@ -266,20 +317,15 @@ TASK_FAILED: [reason why it cannot be completed]
         if not self.config.auto_retry:
             return False
         
-        # Don't retry tools that fundamentally can't work
         permanent_errors = [
             "not found", "does not exist", "access denied",
             "invalid arguments", "unknown tool", "blocked"
         ]
-        
         error_lower = error.lower()
         if any(err in error_lower for err in permanent_errors):
             return False
-        
-        # Don't retry if already failed multiple times
         if self.state.consecutive_failures >= self.config.max_consecutive_failures:
             return False
-        
         return True
 
     def _execute_tool(self, tool_name: str, tool_args: Dict) -> ToolResult:
@@ -287,9 +333,12 @@ TASK_FAILED: [reason why it cannot be completed]
         self.state.last_tool = tool_name
         self.state.tools_used += 1
         
-        # Check if this is a light tool (doesn't need brain)
         if is_light_tool(tool_name):
             logger.debug(f"Tool {tool_name} is light (no brain needed)")
+        
+        # Notify router about tool usage (keeps category loaded)
+        if self.tool_router:
+            self.tool_router.on_tool_used(tool_name)
         
         # Execute with retries
         last_result = None
@@ -304,19 +353,16 @@ TASK_FAILED: [reason why it cannot be completed]
                     self._failed_tools.remove(tool_name)
                 return result
             
-            # Tool failed
             if attempt < self.config.max_retries and self._should_retry(tool_name, result.error or ""):
                 self.state.retries += 1
                 logger.info(f"Retrying tool {tool_name} (attempt {attempt + 2})")
-                time.sleep(0.5)  # Brief pause before retry
+                time.sleep(0.5)
             else:
                 break
         
-        # All retries exhausted
         self.state.failed_tools += 1
         self.state.consecutive_failures += 1
         self._failed_tools.add(tool_name)
-        
         return last_result
 
     def run(
@@ -328,18 +374,32 @@ TASK_FAILED: [reason why it cannot be completed]
         """
         Run the agent loop on a user message.
         Yields events as the agent progresses.
+        Uses smart routing to only load relevant tools.
         """
         
         # Reset state
         self.messages = [{"role": "user", "content": user_message}]
         self.state = AgentState()
         
-        system_prompt = self._get_system_prompt(brain_type)
+        # Get system prompt WITH smart routing based on user message
+        system_prompt, routing_info = self._get_system_prompt(brain_type, user_message)
         
         yield {
             "type": EventType.STATUS.value,
             "message": f"Agent started with {brain_type} brain..."
         }
+        
+        # Report tool loading info
+        yield {
+            "type": EventType.TOOLS_LOADED.value,
+            "mode": routing_info["mode"],
+            "categories": routing_info["categories"],
+            "tool_count": routing_info["tool_count"],
+        }
+        
+        if self.config.verbose and routing_info["mode"] == "smart":
+            logger.info(f"[AgentLoop] Smart routing: {routing_info['tool_count']} tools "
+                       f"from categories {routing_info['categories']}")
         
         # Main loop
         while self.state.iterations < self.config.max_iterations:
@@ -351,13 +411,15 @@ TASK_FAILED: [reason why it cannot be completed]
                 "max_iterations": self.config.max_iterations
             }
             
-            # Format conversation
             conversation = self._format_conversation()
             
-            # Get model response
             try:
                 model_id = brain_id or self.brain_manager.current_model_id or "default"
                 
+                # VRAM GUARD: Aggressive cleanup before generation
+                # Uses full _free_vram() to also clear brain_manager cached tensor refs
+                self._free_vram()
+
                 response = self.brain_manager.generate_text(
                     model_id=model_id,
                     system_prompt=system_prompt,
@@ -381,10 +443,12 @@ TASK_FAILED: [reason why it cannot be completed]
                 }
                 break
             
-            # Add response to conversation
+            # VRAM CLEANUP: Free tensors and cache after each generation
+            # This prevents VRAM from growing with each tool-use iteration
+            self._free_vram()
+            
             self.messages.append({"role": "assistant", "content": response})
             
-            # Show thinking
             if self.config.show_thinking:
                 thinking = response.split('```json')[0].split('{"tool"')[0].split('<tool>')[0].strip()
                 if thinking:
@@ -419,6 +483,25 @@ TASK_FAILED: [reason why it cannot be completed]
                 tool_name = tool_use["name"]
                 tool_args = tool_use["args"]
                 
+                # Smart expansion: if AI needs a tool not in current prompt,
+                # load its category and regenerate
+                if self.tool_router:
+                    expanded = self.tool_router.expand_for_tool(tool_name)
+                    if expanded:
+                        # Reload system prompt with expanded categories
+                        categories, tool_count = self.tool_router.route(user_message)
+                        system_prompt, routing_info = self._get_system_prompt(
+                            brain_type, user_message
+                        )
+                        yield {
+                            "type": EventType.TOOLS_LOADED.value,
+                            "mode": "expanded",
+                            "categories": routing_info["categories"],
+                            "tool_count": routing_info["tool_count"],
+                        }
+                        logger.info(f"[AgentLoop] Expanded tools for '{tool_name}': "
+                                   f"{routing_info['tool_count']} tools")
+                
                 yield {
                     "type": EventType.TOOL_START.value,
                     "tool": tool_name,
@@ -426,7 +509,6 @@ TASK_FAILED: [reason why it cannot be completed]
                     "iteration": self.state.iterations
                 }
                 
-                # Execute tool
                 result = self._execute_tool(tool_name, tool_args)
                 
                 yield {
@@ -438,7 +520,6 @@ TASK_FAILED: [reason why it cannot be completed]
                     "iteration": self.state.iterations
                 }
                 
-                # Add result to conversation
                 if result.success:
                     result_text = f"Tool '{tool_name}' succeeded:\n{self._truncate_output(result.output)}"
                 else:
@@ -446,16 +527,16 @@ TASK_FAILED: [reason why it cannot be completed]
                 
                 self.messages.append({"role": "user", "content": result_text})
                 
-                # Check for too many failures
                 if self.state.consecutive_failures >= self.config.max_consecutive_failures:
                     yield {
                         "type": EventType.WARNING.value,
                         "message": f"Multiple consecutive failures. Consider alternative approach."
                     }
-                
+                # VRAM CLEANUP: Free VRAM after tool execution
+                self._free_vram()
+
                 continue
-            
-            # No tool use, no completion - treat as final response
+
             yield {
                 "type": EventType.COMPLETE.value,
                 "status": "success",
@@ -464,7 +545,6 @@ TASK_FAILED: [reason why it cannot be completed]
             }
             break
         
-        # Check if we hit max iterations
         if self.state.iterations >= self.config.max_iterations:
             yield {
                 "type": EventType.WARNING.value,
@@ -477,14 +557,49 @@ TASK_FAILED: [reason why it cannot be completed]
                 "state": self.state.to_dict()
             }
 
+        # VRAM CLEANUP: Free VRAM after agent task completes
+        self._free_vram()
+
+    def _free_vram(self):
+        """Free GPU memory after generation to prevent VRAM creep.
+        
+        Without this, each iteration of the agent loop (generate → tool → generate)
+        leaves residual tensors in VRAM. After 5-10 tool calls, VRAM can grow by 1-2GB.
+        This forces PyTorch to release cached memory back to the OS.
+        """
+        try:
+            import torch
+            if torch.cuda.is_available():
+                # Aggressive: double gc + delete cached model refs
+                gc.collect()
+                if hasattr(self, 'brain_manager') and self.brain_manager:
+                    for attr in ('_last_output', '_cache', '_past_key_values'):
+                        if hasattr(self.brain_manager, attr):
+                            try:
+                                delattr(self.brain_manager, attr)
+                            except Exception:
+                                pass
+                gc.collect()
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                logger.debug("[VRAM] Aggressive cleanup done")
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.debug(f"[VRAM] Cleanup error: {e}")
+
     def get_status(self) -> Dict[str, Any]:
         """Get current agent status"""
-        return {
+        status = {
             "state": self.state.to_dict(),
             "messages_count": len(self.messages),
             "tools_available": self.tool_registry.list_tools(),
-            "failed_tools": list(self._failed_tools)
+            "failed_tools": list(self._failed_tools),
+            "smart_routing": self.config.smart_routing and self.tool_router is not None,
         }
+        if self.tool_router:
+            status["router_status"] = self.tool_router.get_status()
+        return status
 
 
 # ============================================
@@ -496,15 +611,12 @@ def event_to_sse(event: Dict[str, Any]) -> str:
     return f"data: {json.dumps(event)}\n\n"
 
 
-def create_agent(brain_manager, max_iterations: int = 15, **kwargs) -> EAAAgentLoop:
+def create_agent(brain_manager, max_iterations: int = 15, 
+                 tool_registry: ToolRegistry = None, **kwargs) -> EAAAgentLoop:
     """Create an agent loop with configuration"""
     config = AgentConfig(max_iterations=max_iterations, **kwargs)
-    return EAAAgentLoop(brain_manager, config)
+    return EAAAgentLoop(brain_manager, config, tool_registry=tool_registry)
 
-
-# ============================================
-# CONVENIENCE FUNCTION
-# ============================================
 
 def run_task(
     brain_manager, 

@@ -62,10 +62,10 @@ SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 EMAIL_FROM = "majed1.alshoghri@gmail.com"
 EMAIL_TO = "majed1.alshoghri@gmail.com"
-EMAIL_PASSWORD = "vqgeblnuxfqsxbxn" # Gmail App Password
+EMAIL_PASSWORD = "jgdkcwuqcqnrlnya" # Gmail App Password
 
 def send_email_notification(subject, body):
-    """Send email notification - never crashes server"""
+    """Send email notification - never crashes server, has timeout"""
     if not EMAIL_ENABLED:
         return False
     try:
@@ -76,7 +76,7 @@ def send_email_notification(subject, body):
 
         msg.attach(MIMEText(body, 'plain'))
 
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15)
         server.starttls()
         server.login(EMAIL_FROM, EMAIL_PASSWORD)
         server.send_message(msg)
@@ -1180,9 +1180,8 @@ def start_eaa():
 
         state.eaa_process = subprocess.Popen(
             [sys.executable, EAA_SCRIPT],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             cwd=SCRIPT_DIR
         )
 
@@ -1249,31 +1248,40 @@ def start_tunnel():
         stop_tunnel()
         time.sleep(1)
 
+        import tempfile
+        cf_log_path = os.path.join(tempfile.gettempdir(), "cf_tunnel.log")
+        cf_log = open(cf_log_path, "w")
         state.tunnel_process = subprocess.Popen(
-            [CLOUDFLARED_PATH, "tunnel", "--url", f"http://localhost:{PORT}"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True
+            [CLOUDFLARED_PATH, "tunnel", "--url", f"http://localhost:{PORT}", "--no-autoupdate"],
+            stdout=cf_log,
+            stderr=cf_log
         )
 
-        # Wait for URL
+        # Wait for URL by reading log file (no pipe = no overflow)
         for _ in range(30):
+            time.sleep(1)
             try:
-                line = state.tunnel_process.stdout.readline()
-                if "trycloudflare.com" in line:
-                    match = re.search(r'https://[a-zA-Z0-9-]+\.trycloudflare\.com', line)
-                    if match:
-                        state.tunnel_url = match.group(0)
-                        log(f"[TUNNEL] Started: {state.tunnel_url}")
+                with open(cf_log_path, "r") as lf:
+                    for line in lf:
+                        if "trycloudflare.com" in line:
+                            match = re.search(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com", line)
+                            if match:
+                                state.tunnel_url = match.group(0)
+                                log(f"[TUNNEL] Started: {state.tunnel_url}")
 
-                        # SEND EMAIL NOTIFICATION!
-                        threading.Thread(
-                            target=send_tunnel_notification,
-                            args=(state.tunnel_url, API_KEY, SECRET_PHRASE, "Tunnel Restarted"),
-                            daemon=True
-                        ).start()
+                                def _email_with_retry():
+                                    for attempt in range(3):
+                                        ok = send_tunnel_notification(
+                                            state.tunnel_url, API_KEY, SECRET_PHRASE,
+                                            "Tunnel Restarted" if attempt > 0 else "Server Started"
+                                        )
+                                        if ok:
+                                            return
+                                        time.sleep(3 * (attempt + 1))
+                                    log("[EMAIL] All 3 email attempts failed")
 
-                        return state.tunnel_url
+                                threading.Thread(target=_email_with_retry, daemon=True).start()
+                                return state.tunnel_url
             except:
                 pass
 
@@ -1321,6 +1329,11 @@ def watchdog():
             # Check EAA
             if EAA_AUTO_RESTART and not state.eaa_is_alive():
                 log("[WATCHDOG] EAA died - restarting...")
+                send_email_notification("EAA V7 - AI Server Restarted",
+                    f"EAA AI Server died and was auto-restarted by watchdog.\n"
+                    f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                    f"Tunnel URL: {state.tunnel_url or 'N/A'}\n"
+                    f"API Key: {API_KEY}\nSecret: {SECRET_PHRASE}")
                 start_eaa()
 
             # Check tunnel
@@ -1418,7 +1431,12 @@ class BulletproofHandler(BaseHTTPRequestHandler):
                 session_time = time.time()
                 return True, None, session_token
 
-            return False, "Session locked by another user", session_token  # Return current token so they know
+            # Valid API key but different session = take over (same owner re-connecting)
+            old_token = session_token
+            session_token = "SESS_" + secrets.token_urlsafe(32)
+            session_time = time.time()
+            log(f"[SESSION] Overridden (was {old_token[:15]}...) → new: {session_token[:15]}...")
+            return True, None, session_token
 
         except Exception as e:
             log(f"[AUTH] Error: {e}")
