@@ -21,7 +21,7 @@ EAA (Embedded AI Assistant) is a fully local AI assistant that runs entirely on 
 **Key Features:**
 - 🔒 **100% Private** - All processing happens locally
 - 🧠 **Multiple AI Brains** - Different models for different tasks
-- 🛠️ **19+ Built-in Tools** - File operations, web search, code execution
+- 🛠️ **128 Built-in Tools** - File ops, web, code, browser, Docker, PDF, images, video, AI models, and more
 - 🌐 **Remote Access** - Connect from anywhere via Cloudflare tunnel
 - 💻 **Modern UI** - Built with React 19 and Tauri 2
 - 📝 **Canvas Editor** - Full-featured code editor with AI assistance
@@ -569,30 +569,207 @@ registry.register("write_file", tool_write_file, "Write content to file")
 
 ## Tool System
 
-EAA has **19+ built-in tools** that allow the AI to interact with your computer.
+EAA has **128 built-in tools** across 13 specialized modules, allowing the AI to perform virtually any task on your computer.
 
-### Current Tools
+### Tool Modules
 
-| Category | Tool | Description |
-|----------|------|-------------|
-| **File** | `read_file` | Read file contents with line numbers |
-| **File** | `write_file` | Create or overwrite files |
-| **File** | `append_file` | Append content to existing files |
-| **File** | `list_files` | List directory contents with sizes |
-| **File** | `file_exists` | Check if file exists |
-| **File** | `create_directory` | Create new directories |
-| **File** | `delete_file` | Delete files or directories |
-| **File** | `glob` | Find files matching pattern |
-| **File** | `grep` | Search for text in files |
-| **System** | `shell` | Execute shell commands |
-| **Web** | `web_search` | Search the web via DuckDuckGo |
-| **Web** | `web_fetch` | Fetch and read web page content |
-| **Memory** | `memory_save` | Save information to persistent memory |
-| **Memory** | `memory_recall` | Retrieve saved information |
-| **Memory** | `memory_list` | List all saved memory keys |
-| **Utility** | `datetime` | Get current date and time |
-| **Utility** | `calculator` | Evaluate math expressions |
-| **Code** | `python` | Execute Python code safely |
+| Module | File | Tools | Description |
+|--------|------|-------|-------------|
+| **Base** | `eaa_agent_tools.py` | 18 | Core file, shell, web, memory, utility tools |
+| **Advanced** | `eaa_agent_tools_advanced.py` | 24 | Docker, networking, DNS, RSS, PDF ops, MQTT, video |
+| **Multimodal** | `eaa_multimodal_tools.py` | 7 | Image analyze/generate/convert/resize, OCR |
+| **Document** | `eaa_document_tools.py` | 9 | PDF read/create, DOCX, XLSX, PPTX |
+| **System** | `eaa_system_tools.py` | 9 | Screenshot, clipboard, process, system info, app launch |
+| **Code** | `eaa_code_tools.py` | 9 | Code run/lint/format/test, Git operations |
+| **Browser** | `eaa_browser_tools.py` | 7 | Browser automation (open, click, type, scroll, screenshot) |
+| **Communication** | `eaa_communication_tools.py` | 3 | Email, notifications, SMS |
+| **Memory Enhanced** | `eaa_memory_enhanced.py` | 9 | Memory search, context save/load, import/export |
+| **Data** | `eaa_data_tools.py` | 7 | JSON, CSV, database, API calls, hashing |
+| **Audio/Video** | `eaa_audio_video_tools.py` | 6 | Audio transcribe/generate, video analyze/info |
+| **Scheduler** | `eaa_scheduler_tools.py` | 4 | Task scheduling, cron jobs |
+| **CPU Quick** | `eaa_tools_cpu.py` | 9 | Crypto, weather, stocks, exchange rates, news (no GPU needed) |
+
+### Complete Tool List (128 Tools)
+
+**File Operations (9)**
+| Tool | Description |
+|------|-------------|
+| `read_file` | Read file contents with line numbers |
+| `write_file` | Create or overwrite files |
+| `append_file` | Append content to existing files |
+| `list_files` | List directory contents with sizes |
+| `file_exists` | Check if file exists |
+| `create_directory` | Create new directories |
+| `delete_file` | Delete files or directories |
+| `glob` | Find files matching pattern |
+| `grep` | Search for text in files |
+
+**System & Shell (11)**
+| Tool | Description |
+|------|-------------|
+| `shell` | Execute shell commands |
+| `screenshot` | Capture screen screenshot |
+| `clipboard_read` | Read clipboard content |
+| `clipboard_write` | Write to clipboard |
+| `process_list` | List running processes |
+| `process_kill` | Kill a process by PID |
+| `system_info` | Get system information |
+| `app_launch` | Launch applications |
+| `env_get` | Get environment variables |
+| `env_set` | Set environment variables |
+| `datetime` | Get current date/time/timezone |
+
+**Web & Network (12)**
+| Tool | Description |
+|------|-------------|
+| `web_search` | Search the web via DuckDuckGo |
+| `web_fetch` | Fetch and read web page content |
+| `rss_read` | Read RSS/Atom feeds |
+| `html_extract` | Extract data from HTML pages |
+| `wayback_fetch` | Fetch archived pages from Wayback Machine |
+| `whois_lookup` | Domain WHOIS lookup |
+| `dns_resolve` | DNS record resolution |
+| `subdomain_enum` | Subdomain enumeration |
+| `ping_host` | Ping a host |
+| `traceroute` | Traceroute to a host |
+| `port_scan` | Port scanning |
+| `api_call` | Make HTTP API calls |
+
+**Code & Git (9)**
+| Tool | Description |
+|------|-------------|
+| `code_run` | Execute code in multiple languages |
+| `code_lint` | Lint code files |
+| `code_format` | Format code files |
+| `code_test` | Run test suites |
+| `git_status` | Git repository status |
+| `git_commit` | Git commit changes |
+| `git_diff` | View git diffs |
+| `git_log` | View git history |
+| `git_branch` | Create/switch branches |
+
+**Docker (5)**
+| Tool | Description |
+|------|-------------|
+| `docker_list` | List containers/images |
+| `docker_build` | Build Docker images |
+| `docker_start` | Start containers |
+| `docker_stop` | Stop containers |
+| `docker_logs` | View container logs |
+
+**Multimodal / Images (7)**
+| Tool | Description |
+|------|-------------|
+| `image_analyze` | AI-powered image analysis |
+| `image_describe` | Describe image contents |
+| `ocr_extract` | Extract text from images (OCR) |
+| `image_generate` | Generate images from text prompts |
+| `image_info` | Get image metadata |
+| `image_convert` | Convert between image formats |
+| `image_resize` | Resize images |
+
+**Browser Automation (7)**
+| Tool | Description |
+|------|-------------|
+| `browser_open` | Open URL in browser |
+| `browser_click` | Click page elements |
+| `browser_type` | Type text into inputs |
+| `browser_screenshot` | Capture browser screenshots |
+| `browser_scroll` | Scroll page content |
+| `browser_get_text` | Extract text from pages |
+| `browser_close` | Close browser |
+
+**Documents (9)**
+| Tool | Description |
+|------|-------------|
+| `pdf_read` | Read PDF files |
+| `pdf_info` | Get PDF metadata |
+| `pdf_create` | Create PDF documents |
+| `pdf_split` | Split PDF pages |
+| `pdf_merge` | Merge multiple PDFs |
+| `pdf_watermark` | Add watermarks to PDFs |
+| `docx_read` | Read Word documents |
+| `docx_create` | Create Word documents |
+| `xlsx_read` | Read Excel spreadsheets |
+| `xlsx_create` | Create Excel spreadsheets |
+| `pptx_read` | Read PowerPoint files |
+| `pptx_create` | Create PowerPoint files |
+
+**Audio & Video (9)**
+| Tool | Description |
+|------|-------------|
+| `audio_transcribe` | Transcribe audio to text |
+| `audio_generate` | Generate speech from text |
+| `audio_info` | Get audio file metadata |
+| `audio_convert` | Convert audio formats |
+| `video_analyze` | AI video analysis |
+| `video_info` | Get video metadata |
+| `video_trim` | Trim video clips |
+| `video_extract_audio` | Extract audio from video |
+| `video_compress` | Compress video files |
+
+**Memory & Context (12)**
+| Tool | Description |
+|------|-------------|
+| `memory_save` | Save to persistent memory |
+| `memory_recall` | Recall from memory |
+| `memory_list` | List memory keys |
+| `memory_delete` | Delete memory entries |
+| `memory_clear` | Clear all memory |
+| `memory_search` | Semantic memory search |
+| `memory_export` | Export memory to file |
+| `memory_import` | Import memory from file |
+| `memory_stats` | Memory usage statistics |
+| `context_save` | Save conversation context |
+| `context_load` | Load saved context |
+| `context_list` | List saved contexts |
+
+**Data (7)**
+| Tool | Description |
+|------|-------------|
+| `json_parse` | Parse and query JSON |
+| `csv_read` | Read CSV files |
+| `csv_write` | Write CSV files |
+| `database_query` | Execute SQL queries |
+| `hash_text` | Hash text strings |
+| `hash_file` | Hash file contents |
+| `calculator` | Evaluate math expressions |
+
+**Communication (3)**
+| Tool | Description |
+|------|-------------|
+| `email_send` | Send emails via SMTP |
+| `notify_send` | Desktop notifications |
+| `sms_send` | Send SMS messages |
+
+**Scheduling (4)**
+| Tool | Description |
+|------|-------------|
+| `schedule_task` | Schedule tasks for later |
+| `schedule_list` | List scheduled tasks |
+| `schedule_cancel` | Cancel scheduled tasks |
+| `schedule_info` | Get task details |
+
+**CPU Quick Tools (7 - No GPU Required)**
+| Tool | Description |
+|------|-------------|
+| `crypto_price` | Cryptocurrency prices (BTC, ETH, SOL) |
+| `weather` | Current weather for any city |
+| `exchange_rate` | Currency exchange rates |
+| `stock_price` | Stock prices from Yahoo Finance |
+| `wikipedia` | Wikipedia summaries |
+| `news` | News headlines by category |
+| `hardware_stats` | Hardware performance stats |
+
+**Other (6)**
+| Tool | Description |
+|------|-------------|
+| `github_issue` | Manage GitHub issues |
+| `mqtt_publish` | Publish MQTT messages |
+| `mqtt_subscribe` | Subscribe to MQTT topics |
+| `python` | Execute Python code |
+| `time_zone` | Time in any timezone |
+| `context_delete` | Delete saved contexts |
 
 ### Tool Call Example
 
@@ -1094,37 +1271,6 @@ Optimized for **RTX 4060 Ti 8GB** running **Qwen2.5-7B-Instruct (BNB 4-bit)** vi
 - VRAM budgeting prevents OOM crashes
 - Model hot-swap enables multi-brain workflows
 - SIGINT handler ensures clean GPU memory release within 5 seconds
-
----
-
-## Upgrades To Do
-
-> 📋 **See [UPGRADES_TO_DO.md](./UPGRADES_TO_DO.md) for the complete list of planned upgrades!**
-
-EAA is continuously evolving. Here's a summary of planned upgrades to make EAA as capable as Z.ai, Claude, and GLM-5:
-
-### Current Tools: 19 ✅
-
-### Planned: 50+ New Tools
-
-| Phase | Category | Tools | Priority |
-|-------|----------|-------|----------|
-| **1** | Multi-Modal | `image_analyze`, `image_generate`, `ocr_extract` | HIGH |
-| **2** | Documents | `pdf_read`, `docx_create`, `xlsx_read` | HIGH |
-| **3** | Code Execution | `code_run`, `git_status`, `git_commit` | HIGH |
-| **4** | System | `screenshot`, `clipboard_read`, `process_list` | MEDIUM |
-| **5** | Browser | `browser_open`, `browser_click`, `browser_type` | MEDIUM |
-| **6** | Communication | `email_send`, `notify_send` | MEDIUM |
-| **7** | Advanced Memory | `memory_search`, `context_save` | MEDIUM |
-| **8** | Data | `csv_read`, `database_query`, `api_call` | LOW |
-| **9** | Audio/Video | `audio_transcribe`, `audio_generate` | LOW |
-| **10** | Scheduling | `schedule_task`, `schedule_list` | LOW |
-
-### Required Packages
-
-```bash
-pip install Pillow pytesseract PyPDF2 python-docx openpyxl python-pptx psutil pyperclip pyautogui
-```
 
 ---
 
