@@ -184,7 +184,7 @@ TOOLS_DIR = os.path.join(SCRIPT_DIR, "tools")
 CLOUDFLARED_PATH = os.path.join(TOOLS_DIR, "cloudflared.exe")
 ALLOWED_PATH = r"C:\Users\offic"
 PORT = 8001
-EAA_SCRIPT = os.path.join(SCRIPT_DIR, "run_eaa_agent_v3.py")
+EAA_SCRIPT = os.path.join(SCRIPT_DIR, "run_eaa_v4.py")  # V4 bridge
 EAA_BACKEND_URL = "http://localhost:8000"
 
 # Auto-restart settings

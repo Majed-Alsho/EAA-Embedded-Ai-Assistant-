@@ -48,6 +48,7 @@ class DelegationTask:
     A single unit of work to be delegated from Master to Worker.
     This is the structured routing command that replaces raw tool calls.
     """
+    task_id: str = ""                     # Unique task ID for tracking
     worker_id: str                          # Which worker to invoke
     tool_name: str                          # Which tool to use
     tool_args: Dict[str, Any]               # Tool parameters
@@ -58,6 +59,7 @@ class DelegationTask:
 
     def to_dict(self) -> Dict:
         return {
+            "task_id": self.task_id,
             "worker_id": self.worker_id,
             "tool_name": self.tool_name,
             "tool_args": self.tool_args,
@@ -70,6 +72,7 @@ class DelegationTask:
     @classmethod
     def from_dict(cls, data: Dict) -> "DelegationTask":
         return cls(
+            task_id=data.get("task_id", ""),
             worker_id=data["worker_id"],
             tool_name=data["tool_name"],
             tool_args=data.get("tool_args", {}),
